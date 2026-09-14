@@ -227,6 +227,72 @@ export function drawHourly(svg, checkpoints) {
 }
 
 /**
+ * 오늘 시간별 강의 피드백 추이.
+ *
+ * 정각마다 마감된 난이도·속도 평균이 checkpoints 에 이미 쌓이고 있는데
+ * 화면에 안 보여주고 있었습니다. 강사 입장에선 이게 제일 쓸모 있는 화면이에요 —
+ * "3교시에 다들 어려워했구나" 가 한눈에 보입니다.
+ *
+ * 두 선 모두 -2~+2 로 같은 눈금이라 한 축에 겹쳐 그립니다.
+ */
+export function drawLectureTrend(svg, checkpoints) {
+  const today = new Date().toDateString();
+  const rows = checkpoints
+    .filter((c) => new Date(c.hour_at).toDateString() === today && Number(c.lec_n) > 0)
+    .sort((a, b) => new Date(a.hour_at) - new Date(b.hour_at));
+
+  if (rows.length < 2) {
+    svg.innerHTML =
+      `<text x="180" y="52" text-anchor="middle" fill="var(--ink-3)" font-family="var(--sans)" font-size="12.5">` +
+      `${rows.length ? "한 시간치만 마감됐어요" : "정각이 두 번 지나면 추이가 그려져요"}</text>`;
+    return;
+  }
+
+  const W = 360, H = 116, X0 = 34, X1 = 326, Y0 = 16, Y1 = 84;
+  const px = (i) => X0 + (i / (rows.length - 1)) * (X1 - X0);
+  const py = (v) => Y1 - ((clamp(v, -2, 2) + 2) / 4) * (Y1 - Y0);
+  const out = [];
+
+  // 눈금: 딱 좋음(0) 선을 굵게
+  for (const [v, lab] of [[2, "+2"], [0, "0"], [-2, "−2"]]) {
+    out.push(`<line x1="${X0}" y1="${py(v).toFixed(1)}" x2="${X1}" y2="${py(v).toFixed(1)}" stroke="var(--line)" stroke-width="${v === 0 ? 1.5 : 1}" fill="none"/>`);
+    out.push(`<text x="${X0 - 7}" y="${(py(v) + 4).toFixed(1)}" text-anchor="end" fill="var(--ink-3)" font-family="var(--mono)" font-size="10">${lab}</text>`);
+  }
+  out.push(`<text x="${X1}" y="${(py(0) - 6).toFixed(1)}" text-anchor="end" fill="var(--ink-3)" font-family="var(--sans)" font-size="10">딱 좋음</text>`);
+
+  const series = [
+    { key: "diff_avg", color: "var(--grad-hot)", name: "난이도" },
+    { key: "pace_avg", color: "var(--grad-cold)", name: "속도" },
+  ];
+
+  for (const s of series) {
+    const pts = rows.map((r, i) => ({ i, v: Number(r[s.key]) })).filter((p) => Number.isFinite(p.v));
+    if (pts.length < 2) continue;
+    const d = pts.map((p, k) => `${k ? "L" : "M"} ${px(p.i).toFixed(1)} ${py(p.v).toFixed(1)}`).join(" ");
+    out.push(`<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>`);
+    for (const p of pts) {
+      out.push(`<circle cx="${px(p.i).toFixed(1)}" cy="${py(p.v).toFixed(1)}" r="5" fill="var(--ring)"/>`);
+      out.push(`<circle cx="${px(p.i).toFixed(1)}" cy="${py(p.v).toFixed(1)}" r="3.2" fill="${s.color}"/>`);
+    }
+  }
+
+  rows.forEach((r, i) => {
+    out.push(`<text x="${px(i).toFixed(1)}" y="${Y1 + 16}" text-anchor="middle" fill="var(--ink-3)" font-family="var(--mono)" font-size="10.5">${new Date(r.hour_at).getHours()}시</text>`);
+    out.push(`<text x="${px(i).toFixed(1)}" y="${Y1 + 28}" text-anchor="middle" fill="var(--ink-3)" font-family="var(--sans)" font-size="9.5">${r.lec_n}명</text>`);
+  });
+
+  // 선이 둘이라 범례가 필요합니다
+  series.forEach((s, k) => {
+    const lx = X0 + k * 70;
+    out.push(`<circle cx="${lx}" cy="${H - 6}" r="4" fill="${s.color}"/>`);
+    out.push(`<text x="${lx + 8}" y="${H - 2}" fill="var(--ink-2)" font-family="var(--sans)" font-size="10.5">${s.name}</text>`);
+  });
+
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.innerHTML = out.join("");
+}
+
+/**
  * -2 ~ +2 눈금 위에 바늘 하나. 강의 난이도·속도와 "지금 체감"에 씁니다.
  * @param {string[]} labels 왼쪽 끝 · 가운데 · 오른쪽 끝 라벨
  */

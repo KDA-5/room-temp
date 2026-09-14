@@ -21,7 +21,7 @@ import {
   adaptiveComfort, humidityAdvice, triviaOfToday, TRIVIA,
   msToNextHour, countdownText,
 } from "./climate.js";
-import { drawRidge, drawSpark, drawHourly, gaugeSVG, zoneMapHTML, P } from "./chart.js";
+import { drawRidge, drawSpark, drawHourly, drawLectureTrend, gaugeSVG, zoneMapHTML, P } from "./chart.js";
 import { feedHTML, MAX_PIN } from "./board.js";
 
 const $ = (id) => document.getElementById(id);
@@ -419,6 +419,8 @@ function renderLecture() {
   document.querySelectorAll("#paceRow .feel").forEach((el) => {
     el.setAttribute("aria-pressed", String(mine.pace !== null && String(mine.pace) === el.dataset.pace));
   });
+
+  drawLectureTrend($("lecTrend"), S.checkpoints);
 
   const hh = new Date(hourStart).getHours();
   $("lecReset").textContent = `${hh}시 집계 · ${live.length}명`;
