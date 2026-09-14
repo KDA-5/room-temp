@@ -24,7 +24,7 @@ export const TITLES = {
   chat: "🗨️ 대화",
   board: "💬 게시판 · 질문함",
   stats: "📊 통계",
-  me: "🙂 내 캐릭터",
+  me: "🙂 꾸미기",
   draw: "🎲 조 뽑기 · 순서",
   info: "🌤️ 바깥 · 잡학",
   more: "⚙️ 설정",
@@ -120,7 +120,7 @@ export function windPanel(S, c, af, zoned) {
 /* ═══ 대화 로그 ═══════════════════════════════════════════════════════ */
 export function chatPanel(S) {
   if (!S.chatlog.length) {
-    return `<p class="empty">아직 오간 말이 없어요.<br><span class="dim">아래 칸에 쓰면 머리 위 말풍선으로 뜨고, 여기에도 쌓입니다.</span></p>`;
+    return `<p class="empty">아직 오간 말이 없어요.<br><span class="dim">아래 칸에 쓰면 머리 위 말풍선으로 뜨고 여기에도 쌓입니다.</span></p>`;
   }
   const lines = S.chatlog.slice(-60).reverse().map((m) =>
     `<div class="chatline ${m.mine ? "me" : ""}">${creatureSVG(m.cfg, "happy")}` +
@@ -221,13 +221,13 @@ export function drawPanel(S, members) {
   const g = S.config?.draw_groups;
   const groups = g?.groups?.length
     ? `<div class="groups">` + g.groups.map((grp, i) =>
-        `<div class="group"><h4>${i + 1}조 · ${grp.length}명</h4>` +
-        grp.map((m) => `<div class="member">${creatureSVG(m.cfg, "happy")}<span>${esc(m.nick)}</span></div>`).join("") + `</div>`).join("") + `</div>`
+        `<div class="group pop-in" style="animation-delay:${(i * 0.09).toFixed(2)}s"><h4>${i + 1}조 · ${grp.length}명</h4>` +
+        grp.map((m, j) => `<div class="member pop-in" style="animation-delay:${(i * 0.09 + j * 0.04 + 0.12).toFixed(2)}s">${creatureSVG(m.cfg, "happy")}<span>${esc(m.nick)}</span></div>`).join("") + `</div>`).join("") + `</div>`
     : `<p class="empty">위에서 조 개수를 누르면 결과가 나옵니다.</p>`;
 
   const pk = S.config?.draw_pick;
   const pick = pk?.current
-    ? `<div class="pickbox" id="pickBox">${creatureSVG(pk.current.cfg, "happy")}<div class="pickname">${esc(pk.current.nick)}</div></div>`
+    ? `<div class="pickbox landed" id="pickBox">${creatureSVG(pk.current.cfg, "happy")}<div class="pickname">${esc(pk.current.nick)}</div></div>`
     : `<p class="empty">🎯 뽑기를 누르면 한 명이 나옵니다.</p>`;
   const done = members.filter((m) => (pk?.history ?? []).includes(m.key));
 
@@ -301,6 +301,6 @@ export function morePanel(S, c, b, theme) {
     `<hr class="rule"><h3>화면</h3><div class="row mt">` +
     `<button class="mini" id="themeBtn" type="button">테마: ${theme === "system" ? "시스템" : theme === "light" ? "밝게" : "어둡게"}</button>` +
     `<button class="mini" id="qrBtn" type="button">📱 QR</button></div><div id="qrBox" class="row mt"></div>` +
-    `<hr class="rule"><p class="hint">이름도 이메일도 받지 않습니다. 브라우저마다 익명 계정 하나가 생기고, 투표 기록엔 닉네임·캐릭터 말고 아무것도 안 붙어요. 강의실·마당에서의 위치는 저장되지 않고 창을 닫으면 사라집니다.</p>`
+    `<hr class="rule"><p class="hint">이름도 이메일도 받지 않습니다. 브라우저마다 익명 계정 하나가 생기고, 투표 기록엔 닉네임·캐릭터 말고 아무것도 안 붙어요. 강의실 안에서 서 있는 위치도 저장되지 않고, 창을 닫으면 사라집니다.</p>`
   );
 }

@@ -42,6 +42,7 @@
   --tick: #b9aecd;
   --hill-fill: #e6dcf5;
   --hill-line: #c3b6da;
+  --hist: #c9bde2;
 
   /* 방 — 면마다 밝기가 달라야 입체로 보입니다 */
   --ceil: #c3d2e4;
@@ -95,7 +96,7 @@
   --accent: #ff855c; --accent-d: #c25a38; --accent-2: #4a2f3e;
   --good: #2fcfa2; --warn: #f2b04a; --bad: #f3736c;
   --cold: #4a83bd; --mildt: #5d5468; --hot: #cc5f4d; --tube-line: #241f33;
-  --tick: #665b80; --hill-fill: #332b4a; --hill-line: #4e4370;
+  --tick: #665b80; --hill-fill: #332b4a; --hill-line: #4e4370; --hist: #4a4066;
   --ceil: #1b2233; --wall: #2c3550; --wall-l: #222a42; --wall-r: #313c59;
   --edge: rgba(0,0,0,.45);
   --wood: #6d563a; --desk-top: #7d6545; --desk-front: #4f3e29; --desk-side: #624e34;
@@ -117,7 +118,7 @@
   --accent: #ff855c; --accent-d: #c25a38; --accent-2: #4a2f3e;
   --good: #2fcfa2; --warn: #f2b04a; --bad: #f3736c;
   --cold: #4a83bd; --mildt: #5d5468; --hot: #cc5f4d; --tube-line: #241f33;
-  --tick: #665b80; --hill-fill: #332b4a; --hill-line: #4e4370;
+  --tick: #665b80; --hill-fill: #332b4a; --hill-line: #4e4370; --hist: #4a4066;
   --ceil: #1b2233; --wall: #2c3550; --wall-l: #222a42; --wall-r: #313c59;
   --edge: rgba(0,0,0,.45);
   --wood: #6d563a; --desk-top: #7d6545; --desk-front: #4f3e29; --desk-side: #624e34;
@@ -183,7 +184,6 @@ a { color: var(--accent); word-break: break-all; }
 .thend { font: 400 15px var(--sans); fill: var(--ink-3); }
 .thbulb { font: 400 34px var(--display); fill: #fff; }
 .thbulbsub { font: 400 12px var(--sans); fill: rgba(255, 255, 255, .85); }
-.thme { font: 400 17px var(--display); fill: #fff; }
 .thpick { font-size: 17px; }
 .pickme { animation: nudge 1.5s ease-in-out infinite; }
 @keyframes nudge { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(0, -5px); } }
@@ -534,5 +534,22 @@ td.n { font-family: var(--mono); }
 @keyframes flow { to { stroke-dashoffset: -28; } }
 .dodge { font: 400 5px var(--display); fill: var(--flow-less); opacity: .85; }
 .vent rect { opacity: .9; }
+
+/* 뽑기 — 하나씩 톡톡 떠오르게 */
+.pop-in { animation: popin .34s cubic-bezier(.3, 1.5, .5, 1) backwards; }
+@keyframes popin { from { opacity: 0; transform: translateY(10px) scale(.9); } }
+.pickbox.landed { animation: land .42s cubic-bezier(.25, 1.6, .45, 1); }
+@keyframes land {
+  0% { transform: scale(.7) rotate(-6deg); opacity: 0; }
+  60% { transform: scale(1.08) rotate(2deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0); }
+}
+.pickbox.rolling { border-color: var(--accent); background: var(--accent-2); }
+.pickbox.rolling svg { animation: shake .18s linear infinite; }
+.pickbox.rolling .pickname { color: var(--accent); }
+
+/* 온도계 — 내 선과 합의 선이 부드럽게 옮겨가게 */
+.meline, .cons { transition: transform .28s cubic-bezier(.3, 1.4, .5, 1); }
+.thme { font: 400 19px var(--display); fill: #fff; }
 
 @media (prefers-reduced-motion: reduce) { *, .person { animation: none !important; transition-duration: 0ms !important; } }

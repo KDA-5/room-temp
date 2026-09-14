@@ -2,7 +2,7 @@
  * 전부 엮는 곳.
  *
  *   왼쪽   세로 온도계 — 눈금을 누르면 그게 내 희망 온도
- *   가운데 세계 — 강의실 ⇄ 마당. 바닥을 누르면 걸어가고 말풍선으로 채팅
+ *   가운데 강의실 — 바닥을 누르면 내 자리로 걸어가고, 말풍선으로 채팅
  *   아래   이모지 + 채팅 입력
  *   오른쪽 패널 + 아이콘 레일 (강의 · 바람 · 대화 · 게시판 …)
  *
@@ -15,14 +15,14 @@ import "./style.css";
 
 import * as db from "./supa.js";
 import { summarise, clamp, toHalf, r1, fmt } from "./stats.js";
-import { setDark, randomMe } from "./creature.js";
+import { setDark, randomMe, creature } from "./creature.js";
 import {
   resolveSeason, zoneBreakdown, airflow, fetchWeather, triviaOfToday, TRIVIA,
   msToNextHour, countdownText,
 } from "./climate.js";
 import {
-  ROOMS, TV_SLIDES, roomSVG, paintPeople, popReaction, reactionBarHTML,
-  spawnPos, pointToPos, doorAt, zoneAt, zoneCounts, CHAT_MS,
+  ROOM, TV_SLIDES, roomSVG, paintPeople, popReaction, reactionBarHTML,
+  spawnPos, pointToPos, zoneAt, zoneCounts, CHAT_MS,
 } from "./world.js";
 import { drawThermo, thermoTipHTML, yToTemp } from "./thermo.js";
 import { drawRidge, drawSpark, drawHourly, drawLectureTrend, P } from "./chart.js";
@@ -39,7 +39,7 @@ const WIDE = () => window.matchMedia("(min-width: 861px)").matches;
 const S = {
   votes: [], posts: [], config: null, history: [], checkpoints: [],
   mine: null, me: null, uid: null, weather: null,
-  room: "classroom", pos: null, myZone: null,
+  pos: null, myZone: null,
   people: [], prev: new Map(), peers: 0,
   msg: "", msgAt: 0, chatlog: [], seenMsg: new Map(),
   filter: "all", kind: "chat", panel: null, triviaIdx: null,
@@ -111,7 +111,7 @@ function render() {
   const b = band();
   const c = summarise(S.votes, b);
 
-  drawThermo($("thermoSvg"), c, b, myTemp(), myCfg());
+  drawThermo($("thermoSvg"), c, b, myTemp());
   $("thTip").innerHTML = thermoTipHTML(c, b, myTemp(), roomSize());
   paintWorld(c);
 
@@ -128,23 +128,22 @@ function paintWorld(c) {
   const counts = zoneCounts(S.people);
   const af = airflow(zoneBreakdown(S.votes), cc.setpoint);
 
-  const sig = [S.room, S.slide, [...counts.entries()].sort().join(","),
+  const sig = [S.slide, [...counts.entries()].sort().join(","),
                af.rows.map((r) => r.dir).join("")].join("|");
   if (bgSig !== sig) {
     $("roomWrap").querySelector(".roombg")?.remove();
-    $("roomWrap").insertAdjacentHTML("afterbegin", roomSVG(S.room, counts, S.slide, af.byZone));
+    $("roomWrap").insertAdjacentHTML("afterbegin", roomSVG(counts, S.slide, af.byZone));
     bgSig = sig;
   }
 
   // 내 캐릭터는 서버 왕복을 기다리지 않고 로컬 상태로 바로 그립니다
   const meKey = S.uid ?? "me";
-  const others = S.people.filter((p) => p.room === S.room && p.key !== meKey);
-  const me = { key: meKey, room: S.room, x: S.pos.x, y: S.pos.y,
+  const others = S.people.filter((p) => p.key !== meKey);
+  const me = { key: meKey, x: S.pos.x, y: S.pos.y,
                nick: S.me.nick || "익명", cfg: myCfg(), msg: S.msg, msgAt: S.msgAt };
   paintPeople($("people"), [...others, me], meKey, S.prev);
 
-  const room = ROOMS[S.room];
-  $("roomName").textContent = `${room.icon} ${room.name}`;
+  $("roomName").textContent = `${ROOM.icon} ${ROOM.name}`;
   $("peerPill").hidden = S.peers < 2;
   $("peerPill").querySelector("b").textContent = String(S.peers);
 }
@@ -159,7 +158,7 @@ function pushPresence() {
   const send = () => {
     if (!presDirty) { presTimer = null; return; }
     presDirty = false;
-    db.setPresence({ room: S.room, x: S.pos.x, y: S.pos.y, nick: S.me.nick || "익명",
+    db.setPresence({ x: S.pos.x, y: S.pos.y, nick: S.me.nick || "익명",
                      cfg: myCfg(), msg: S.msg || "", msgAt: S.msgAt || 0 });
     presTimer = setTimeout(send, 260);
   };
@@ -168,8 +167,6 @@ function pushPresence() {
 
 function moveTo(pos) {
   if (!pos) return;
-  const door = doorAt(S.room, pos);
-  if (door) return gotoRoom(door.to, door.id);
   S.pos = pos;
   paintWorld();
   pushPresence();
@@ -177,21 +174,9 @@ function moveTo(pos) {
   $("floorTip").style.opacity = "0";
 }
 
-function gotoRoom(key, doorId) {
-  S.room = key;
-  S.pos = spawnPos(key, doorId);
-  S.prev.clear();
-  $("people").innerHTML = "";
-  bgSig = "";
-  pushPresence();
-  syncZone();
-  paintWorld();
-  if (key === "yard" && S.panel !== "chat" && WIDE()) openPanel("chat");
-}
-
 let zoneTimer = null;
 function syncZone() {
-  const z = zoneAt(S.room, S.pos);
+  const z = zoneAt(S.pos);
   if (z === S.myZone) return;
   S.myZone = z;
   if (!S.mine) return;
@@ -389,7 +374,7 @@ function tickClock() {
   if (S.msg && Date.now() - S.msgAt > CHAT_MS) { S.msg = ""; pushPresence(); paintWorld(); }
 
   // TV 안내문 — 9초마다 넘어갑니다
-  if (++slideTick % 9 === 0 && S.room === "classroom") {
+  if (++slideTick % 9 === 0) {
     S.slide = (S.slide + 1) % TV_SLIDES.length;
     paintWorld();
   }
@@ -432,11 +417,6 @@ function wire() {
   // 세계
   $("roomWrap").addEventListener("pointerdown", (e) => {
     if (e.target.closest(".person")) return;
-    const d = e.target.closest(".door");
-    if (d) {
-      const door = ROOMS[S.room].doors.find((x) => x.id === d.dataset.door);
-      if (door) return gotoRoom(door.to, door.id);
-    }
     moveTo(pointToPos(e, $("roomWrap")));
   });
 
@@ -549,10 +529,19 @@ async function onPanelClick(e) {
     if (!m.length) return toast("아직 표를 낸 사람이 없어요");
     const res = pickOne(m, S.config?.draw_pick?.history ?? []);
     if (!res) return;
+    // 후보들을 빠르게 스쳐 지나간 뒤 멈춥니다. 바로 결과만 뜨면 재미가 없어요.
     const box = $("pickBox");
     if (box && !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
       box.classList.add("rolling");
-      await new Promise((r) => setTimeout(r, 600));
+      const name = box.querySelector(".pickname");
+      const slot = box.querySelector("svg");
+      for (let i = 0, wait = 55; i < 16; i++, wait *= 1.16) {
+        const r = m[Math.floor(Math.random() * m.length)];
+        if (name) name.textContent = r.nick;
+        if (slot) slot.innerHTML = creature(r.cfg, "happy");
+        await new Promise((k) => setTimeout(k, wait));
+      }
+      box.classList.remove("rolling");
     }
     if (res.wrapped) toast("한 바퀴 다 돌아 새로 시작합니다");
     return saveConfig({ draw_pick: { at: new Date().toISOString(), current: res.picked, history: res.history } });
@@ -629,8 +618,8 @@ async function boot() {
   if (!S.me.nick) S.me.nick = randomMe().nick;
   saveMe();
 
-  S.pos = spawnPos(S.room);
-  S.myZone = zoneAt(S.room, S.pos);
+  S.pos = spawnPos();
+  S.myZone = zoneAt(S.pos);
   S.lastHour = startOfHour();
 
   wire();
