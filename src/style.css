@@ -441,4 +441,78 @@ footer { font-size: 12px; color: var(--ink-3); text-align: center; margin-top: 8
 .picklist { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 12px; }
 .picklist span { font-size: 11.5px; color: var(--ink-3); background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px; padding: 3px 7px; }
 
+/* ---- 마당 ---------------------------------------------- */
+:root {
+  --yard-sky: #cfe6f7;
+  --yard-far: #bfe0c2;
+  --yard-near: #8fcb9b;
+  --yard-blade: #5aa870;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --yard-sky: #1c2b3a;
+    --yard-far: #23402f;
+    --yard-near: #2f5a41;
+    --yard-blade: #4b8760;
+  }
+}
+:root[data-theme="dark"] {
+  --yard-sky: #1c2b3a;
+  --yard-far: #23402f;
+  --yard-near: #2f5a41;
+  --yard-blade: #4b8760;
+}
+
+.yardwrap[hidden] { display: none !important; }
+.yard {
+  position: relative; margin-top: 14px; border-radius: 16px; overflow: hidden;
+  aspect-ratio: 16 / 9; min-height: 260px; border: 1px solid var(--line);
+  cursor: crosshair; touch-action: manipulation; user-select: none;
+}
+.yardprops { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.yardlayer { position: absolute; inset: 0; }
+.yardhint {
+  position: absolute; left: 50%; top: 10px; transform: translateX(-50%);
+  font-size: 12px; color: var(--ink-2); background: color-mix(in srgb, var(--panel) 82%, transparent);
+  padding: 5px 12px; border-radius: 99px; pointer-events: none; transition: opacity 0.4s ease;
+}
+
+.yperson {
+  position: absolute; transform: translate(-50%, -100%);
+  transition-property: left, top; transition-timing-function: cubic-bezier(0.37, 0, 0.34, 1);
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+}
+.yperson .ybody { width: 46px; }
+.yperson svg { width: 46px; height: 50px; display: block; }
+.yperson .yname {
+  font: 400 10.5px/1.2 var(--display); color: var(--ink-2);
+  background: color-mix(in srgb, var(--panel) 78%, transparent);
+  padding: 1px 6px; border-radius: 99px; white-space: nowrap;
+}
+.yperson.me .yname { color: var(--accent); font-weight: 600; }
+.yperson.me .ybody { filter: drop-shadow(0 0 0 var(--accent)) drop-shadow(0 3px 6px rgba(0, 0, 0, 0.25)); }
+
+.ypop {
+  position: absolute; left: 50%; top: -6px; font-size: 22px; pointer-events: none;
+  animation: pop 2s ease-out forwards;
+}
+@keyframes pop {
+  0% { opacity: 0; transform: translate(-50%, 0) scale(0.6); }
+  18% { opacity: 1; transform: translate(-50%, -14px) scale(1.15); }
+  100% { opacity: 0; transform: translate(-50%, -58px) scale(0.95); }
+}
+
+.yardbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.yreacts { display: flex; gap: 6px; flex-wrap: wrap; }
+.yreactbtn {
+  font-size: 19px; line-height: 1; padding: 8px 10px; border-radius: 11px; cursor: pointer;
+  border: 1px solid var(--line-2); background: var(--panel-2);
+}
+.yreactbtn:hover { border-color: var(--ink-3); transform: translateY(-1px); }
+.yardbar .dim { margin-left: auto; font-size: 12.5px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .yperson { transition-duration: 0ms !important; }
+}
+
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }

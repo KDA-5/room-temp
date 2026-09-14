@@ -226,6 +226,32 @@ export async function recordCheckpoint() {
 let channel = null;
 let onChange = () => {};
 let onPeers = () => {};
+let onYard = () => {};
+let onReact = () => {};
+let myYard = null;   // 마당에 있을 때의 내 좌표 (0~100). 없으면 마당 밖
+
+/**
+ * 마당 — 접속한 사람들의 위치를 실시간으로 주고받습니다.
+ *
+ * 위치는 DB 에 저장하지 않습니다. presence(접속 상태)에만 얹어서
+ * 브라우저를 닫으면 그 자리에서 사라져요. 나중에 "누가 어디 있었나"를
+ * 되짚어볼 수조차 없습니다.
+ *
+ * 탭한 순간 목적지 하나만 보내고, 걸어가는 건 각자 화면에서 계산합니다.
+ * 방향키처럼 계속 쏘면 메시지가 27배로 뛰어요.
+ */
+export function setYard(pos) {
+  myYard = pos;
+  if (channel) channel.track({ at: Date.now(), yard: myYard }).catch(() => {});
+}
+export function watchYard(handler) { onYard = handler; }
+
+/** 리액션 — 지나가기만 하고 아무 데도 안 남습니다. */
+export function sendReact(emoji, from) {
+  if (!channel) return;
+  channel.send({ type: "broadcast", event: "react", payload: { emoji, from } }).catch(() => {});
+}
+export function onReaction(handler) { onReact = handler; }
 
 /** 지금 같은 페이지를 보고 있는 사람 수. 브로드캐스트 채널에 얹어 가는 거라
  *  전송량은 사실상 안 씁니다. */
@@ -278,10 +304,21 @@ export function subscribe(handler) {
     coalesce(msg?.payload?.scope || "all");
   });
   channel.on("presence", { event: "sync" }, () => {
-    onPeers(Object.keys(channel.presenceState() || {}).length);
+    const state = channel.presenceState() || {};
+    onPeers(Object.keys(state).length);
+    // 각 사람의 최신 presence 만 추려서 마당에 넘깁니다
+    const people = [];
+    for (const [key, metas] of Object.entries(state)) {
+      const m = metas[metas.length - 1];
+      if (m?.yard) people.push({ key, ...m.yard });
+    }
+    onYard(people);
+  });
+  channel.on("broadcast", { event: "react" }, (msg) => {
+    if (msg?.payload) onReact(msg.payload);
   });
   channel.subscribe((status) => {
-    if (status === "SUBSCRIBED") channel.track({ at: Date.now() }).catch(() => {});
+    if (status === "SUBSCRIBED") channel.track({ at: Date.now(), yard: myYard }).catch(() => {});
   });
 
   let lastFull = Date.now();

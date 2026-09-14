@@ -22,6 +22,7 @@ import {
   msToNextHour, countdownText, hhmm, windSummary, WIND_MS,
 } from "./climate.js";
 import { makeGroups, pickOne, toMembers } from "./draw.js";
+import { propsSVG, paintPeople, popReaction, reactionBarHTML, spawnPos, pointToPos } from "./yard.js";
 import { drawRidge, drawSpark, drawHourly, drawLectureTrend, gaugeSVG, zoneMapHTML, P } from "./chart.js";
 import { feedHTML, openQuestions, KINDS, MAX_PIN } from "./board.js";
 
@@ -44,6 +45,8 @@ const S = {
   filter: "all",       // 게시판 갈래 필터
   peers: 0,            // 지금 같이 보고 있는 사람 수
   triviaIdx: null,
+  inYard: false,
+  yardPrev: new Map(),   // 캐릭터가 어디서 걸어왔는지 (걷는 시간 계산용)
   ready: false,
   lastHour: null,
   breakSeen: null,     // 이 쉬는 시간의 종료 알림을 이미 띄웠는지
@@ -783,8 +786,77 @@ function notify(title, body) {
 }
 
 // ── 이벤트 ──────────────────────────────────────────────────────────────
+// ---- 마당 ----------------------------------------------------------------
+// 위치는 DB 에 안 들어갑니다. 접속한 사람끼리만 실시간으로 주고받아요.
+
+function myYardKey() {
+  return db.myUid() || "me";
+}
+
+function enterYard() {
+  S.inYard = true;
+  $("yardWrap").hidden = false;
+  $("yardJoin").textContent = "나가기";
+  $("yard").insertAdjacentHTML("afterbegin", propsSVG());
+  $("yardReacts").innerHTML = reactionBarHTML();
+  db.setYard({ ...spawnPos(), nick: S.me.nick || "익명", cfg: { cc: S.me.cc, ce: S.me.ce, ch: S.me.ch, cp: S.me.cp, ci: S.me.ci } });
+  $("yardCard").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function leaveYard() {
+  S.inYard = false;
+  $("yardWrap").hidden = true;
+  $("yardJoin").textContent = "들어가기";
+  $("yard").querySelector(".yardprops")?.remove();
+  $("yardLayer").innerHTML = "";
+  S.yardPrev.clear();
+  db.setYard(null);
+}
+
+function moveTo(pos) {
+  if (!S.inYard || !pos) return;
+  db.setYard({
+    ...pos,
+    nick: S.me.nick || "익명",
+    cfg: { cc: S.me.cc, ce: S.me.ce, ch: S.me.ch, cp: S.me.cp, ci: S.me.ci },
+  });
+  const hint = $("yardHint");
+  if (hint) hint.style.opacity = "0";
+}
+
+function wireYard() {
+  $("yardJoin").addEventListener("click", () => (S.inYard ? leaveYard() : enterYard()));
+
+  $("yard").addEventListener("pointerdown", (e) => {
+    if (e.target.closest(".yperson")) return;   // 캐릭터를 누른 건 이동이 아님
+    moveTo(pointToPos(e, $("yard")));
+  });
+
+  $("yardReacts").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-react]");
+    if (!btn) return;
+    const emoji = btn.dataset.react;
+    db.sendReact(emoji, myYardKey());
+    popReaction($("yardLayer"), myYardKey(), emoji);   // 내 화면엔 바로
+  });
+
+  db.watchYard((people) => {
+    $("yardCount").textContent = people.length ? `마당에 ${people.length}명` : "아직 아무도 없어요";
+    if (!S.inYard) return;
+    paintPeople($("yardLayer"), people, myYardKey(), S.yardPrev);
+  });
+
+  db.onReaction(({ emoji, from }) => {
+    if (S.inYard && from !== myYardKey()) popReaction($("yardLayer"), from, emoji);
+  });
+
+  // 창을 닫을 때 조용히 빠져나갑니다
+  window.addEventListener("pagehide", () => { if (S.inYard) db.setYard(null); });
+}
+
 function wire() {
   $("themeBtn").addEventListener("click", cycleTheme);
+  wireYard();
 
   $("slider").addEventListener("input", (e) => {
     pushVote({ t: parseFloat(e.target.value) }, { debounce: true });
