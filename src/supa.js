@@ -54,35 +54,71 @@ export async function signIn() {
 }
 
 // ── 읽기 ────────────────────────────────────────────────────────────────
+//
+// 무료 요금제의 병목은 저장 공간이 아니라 **전송량**(월 5GB)입니다.
+// 그래서 "무조건 전부 다시 읽기"를 하지 않습니다. 브로드캐스트가
+// 무엇이 바뀌었는지 알려주고, 그 부분만 다시 읽어요.
+//   투표 한 번 바뀜  → votes 만 (7KB)
+//   글 하나 올라옴   → posts 만 (28KB)
+//   정각 도장       → meta 만 (5KB)
+// 전부 읽는 건 첫 접속 때와 15분에 한 번뿐입니다.
 
-/** 화면에 필요한 걸 한 번에 긁어옵니다. */
-export async function readAll() {
-  if (!supabase) return null;
+const FRESH_DAYS = 7;
+const POST_LIMIT = 30;   // 게시판이 제일 무거운 조각이라 짧게 끊습니다
 
-  const since = new Date(Date.now() - 7 * 864e5).toISOString();
+function throwIf(...results) {
+  const bad = results.find((r) => r?.error)?.error;
+  if (bad) throw bad;
+}
+
+/** 투표 + 내 행. 제일 자주 읽는 조각이라 제일 작게 유지합니다. */
+export async function readVotes() {
+  if (!supabase) return {};
+  const since = new Date(Date.now() - FRESH_DAYS * 864e5).toISOString();
+  const [votes, mine] = await Promise.all([
+    supabase.from("votes_public").select("*").gte("updated_at", since),
+    uid ? supabase.from("votes").select("*").eq("uid", uid).maybeSingle() : Promise.resolve({ data: null }),
+  ]);
+  throwIf(votes);
+  return { votes: votes.data ?? [], mine: mine?.data ?? null };
+}
+
+/** 게시판. 제일 무거운 조각이라 글이 올라왔을 때만 읽습니다. */
+export async function readPosts() {
+  if (!supabase) return {};
+  const posts = await supabase
+    .from("posts_public")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(POST_LIMIT);
+  throwIf(posts);
+  return { posts: posts.data ?? [] };
+}
+
+/** 설정 · 일별 기록 · 정각 기록. 거의 안 바뀝니다. */
+export async function readMeta() {
+  if (!supabase) return {};
   const sinceDay = new Date(Date.now() - 21 * 864e5).toISOString().slice(0, 10);
   const sinceHour = new Date(Date.now() - 14 * 3600e3).toISOString();
 
-  const [votes, posts, config, history, checkpoints, mine] = await Promise.all([
-    supabase.from("votes_public").select("*").gte("updated_at", since),
-    supabase.from("posts_public").select("*").order("created_at", { ascending: false }).limit(80),
+  const [config, history, checkpoints] = await Promise.all([
     supabase.from("config").select("*").eq("id", 1).maybeSingle(),
-    supabase.from("history").select("*").gte("d", sinceDay).order("d", { ascending: true }),
+    supabase.from("history").select("d,setpoint,n").gte("d", sinceDay).order("d", { ascending: true }),
     supabase.from("checkpoints").select("*").gte("hour_at", sinceHour).order("hour_at", { ascending: true }),
-    uid ? supabase.from("votes").select("*").eq("uid", uid).maybeSingle() : Promise.resolve({ data: null }),
   ]);
-
-  const firstError = [votes, posts, config, history, checkpoints].find((r) => r?.error)?.error;
-  if (firstError) throw firstError;
-
+  throwIf(history, checkpoints);
   return {
-    votes: votes.data ?? [],
-    posts: posts.data ?? [],
     config: config.data ?? null,
     history: history.data ?? [],
     checkpoints: checkpoints.data ?? [],
-    mine: mine?.data ?? null,
   };
+}
+
+/** 첫 접속용 — 셋을 한 번에. */
+export async function readAll() {
+  if (!supabase) return null;
+  const [v, p, m] = await Promise.all([readVotes(), readPosts(), readMeta()]);
+  return { ...v, ...p, ...m };
 }
 
 // ── 쓰기 ────────────────────────────────────────────────────────────────
@@ -94,7 +130,7 @@ export async function saveVote(patch) {
     .from("votes")
     .upsert({ uid, ...patch, updated_at: new Date().toISOString() }, { onConflict: "uid" });
   if (error) throw error;
-  ping();
+  ping("votes");
 }
 
 export async function saveConfig(patch) {
@@ -104,7 +140,7 @@ export async function saveConfig(patch) {
     .update({ ...patch, updated_at: new Date().toISOString() })
     .eq("id", 1);
   if (error) throw error;
-  ping();
+  ping("meta");
 }
 
 export async function saveHistory(row) {
@@ -119,14 +155,14 @@ export async function addPost(row) {
   if (!supabase || !uid) throw new Error("아직 로그인 전이에요");
   const { error } = await supabase.from("posts").insert({ author: uid, ...row });
   if (error) throw error;
-  ping();
+  ping("posts");
 }
 
 export async function deletePost(id) {
   if (!supabase) return;
   const { error } = await supabase.from("posts").delete().eq("id", id);
   if (error) throw error;
-  ping();
+  ping("posts");
 }
 
 export async function setLike(postId, on) {
@@ -136,14 +172,14 @@ export async function setLike(postId, on) {
     : await supabase.from("post_likes").delete().eq("post_id", postId).eq("uid", uid);
   // 이미 눌러놓고 또 누른 경우(중복키)는 오류가 아니라 그냥 같은 상태입니다.
   if (error && error.code !== "23505") throw error;
-  ping();
+  ping("posts");
 }
 
 export async function togglePin(postId) {
   if (!supabase) return;
   const { error } = await supabase.rpc("toggle_pin", { p_id: postId });
   if (error) throw new Error(error.message);
-  ping();
+  ping("posts");
 }
 
 /**
@@ -155,7 +191,7 @@ export async function recordCheckpoint() {
   const { data, error } = await supabase.rpc("record_checkpoint");
   if (error) throw error;
   const row = Array.isArray(data) ? data[0] : data;
-  if (row?.created) ping();
+  if (row?.created) ping("meta");
   return row ?? null;
 }
 
@@ -164,31 +200,65 @@ export async function recordCheckpoint() {
 let channel = null;
 let onChange = () => {};
 
-/** 뭔가 바꿨다고 다른 사람들에게 알립니다. */
-function ping() {
+/**
+ * 뭔가 바꿨다고 다른 사람들에게 알립니다.
+ * scope 를 실어 보내서, 받는 쪽이 바뀐 조각만 다시 읽게 합니다.
+ * 브로드캐스트 자체는 몇십 바이트라 전송량에 잡히지 않아요.
+ */
+function ping(scope) {
   if (!channel) return;
-  channel.send({ type: "broadcast", event: "changed", payload: { at: Date.now() } }).catch(() => {});
+  channel.send({ type: "broadcast", event: "changed", payload: { scope } }).catch(() => {});
 }
+
+const POLL_MS  = 180000;   // 평상시 폴링: 3분. 투표 조각만 읽습니다
+const FULL_MS  = 1800000;  // 전체 재동기화: 30분에 한 번
+const COALESCE_MS = 1500;  // 동시에 여러 명이 바꿔도 한 번만 다시 읽기
 
 /**
  * 실시간 구독 시작.
- * 브로드캐스트가 즉시 반응을 담당하고, 25초 폴링이 안전망입니다.
- * (탭이 뒤로 가 있는 동안은 폴링을 쉬었다가 돌아오면 바로 한 번 당깁니다.)
+ * 즉시 반응은 브로드캐스트가, 놓친 것 줍기는 폴링이 담당합니다.
+ * 탭이 뒤로 가 있으면 아무것도 안 하고, 돌아오면 한 번 당깁니다.
  */
 export function subscribe(handler) {
   onChange = handler;
   if (!supabase) return () => {};
 
+  // 같은 순간에 여러 명이 슬라이더를 움직이면 알림이 우르르 오는데,
+  // 그때마다 다시 읽으면 전송량만 낭비됩니다. 1.5초 동안 모았다 한 번에 처리해요.
+  let pending = null;
+  let burst = null;
+  const coalesce = (scope) => {
+    pending = pending && pending !== scope ? "all" : scope;
+    if (burst) return;
+    burst = setTimeout(() => {
+      const s = pending;
+      pending = null;
+      burst = null;
+      onChange(s);
+    }, COALESCE_MS);
+  };
+
   channel = supabase.channel("room", { config: { broadcast: { self: false } } });
-  channel.on("broadcast", { event: "changed" }, () => onChange("realtime"));
+  channel.on("broadcast", { event: "changed" }, (msg) => {
+    coalesce(msg?.payload?.scope || "all");
+  });
   channel.subscribe();
 
+  let lastFull = Date.now();
   const timer = setInterval(() => {
-    if (document.visibilityState === "visible") onChange("poll");
-  }, 25000);
+    if (document.visibilityState !== "visible") return;
+    if (Date.now() - lastFull >= FULL_MS) {
+      lastFull = Date.now();
+      onChange("all");
+    } else {
+      onChange("votes");
+    }
+  }, POLL_MS);
 
   const onVisible = () => {
-    if (document.visibilityState === "visible") onChange("visible");
+    if (document.visibilityState !== "visible") return;
+    lastFull = Date.now();
+    onChange("all");   // 돌아왔을 땐 그동안 놓친 게 있을 수 있으니 한 번 전부
   };
   document.addEventListener("visibilitychange", onVisible);
 

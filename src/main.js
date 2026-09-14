@@ -107,26 +107,44 @@ function myLecture() {
 }
 
 // ── 읽기 · 그리기 ───────────────────────────────────────────────────────
+//
+// scope 를 받아서 바뀐 조각만 다시 읽습니다. 전송량 아끼는 핵심이에요.
+// 읽는 중에 또 요청이 오면 버리지 않고 하나로 합쳐서 뒤에 이어 돌립니다.
+
 let loading = false;
-async function refresh() {
-  if (!db.configured || loading) return;
+let queued = null;
+
+const mergeScope = (a, b) => (!a ? b : a === b ? a : "all");
+
+/** 서버에 내 행이 있으면 닉네임·캐릭터는 그쪽이 정답입니다 (기기 바꿔도 유지). */
+function syncMe() {
+  if (!S.mine) return;
+  S.me = {
+    ...S.me,
+    nick: S.mine.nick || S.me.nick,
+    cc: S.mine.cc, ce: S.mine.ce, ch: S.mine.ch, cp: S.mine.cp, ci: S.mine.ci,
+    show: !!S.mine.show_nick,
+    zone: S.mine.zone,
+  };
+  saveMe();
+}
+
+async function refresh(scope = "all") {
+  if (!db.configured) return;
+  if (loading) { queued = mergeScope(queued, scope); return; }
+
   loading = true;
   try {
-    const data = await db.readAll();
+    const data =
+      scope === "votes" ? await db.readVotes()
+      : scope === "posts" ? await db.readPosts()
+      : scope === "meta" ? await db.readMeta()
+      : await db.readAll();
+
     if (data) {
       Object.assign(S, data);
       S.ready = true;
-      // 서버에 내 행이 있으면 닉네임·캐릭터는 그쪽이 정답입니다 (기기 바꿔도 유지)
-      if (S.mine) {
-        S.me = {
-          ...S.me,
-          nick: S.mine.nick || S.me.nick,
-          cc: S.mine.cc, ce: S.mine.ce, ch: S.mine.ch, cp: S.mine.cp, ci: S.mine.ci,
-          show: !!S.mine.show_nick,
-          zone: S.mine.zone,
-        };
-        saveMe();
-      }
+      syncMe();
     }
   } catch (err) {
     console.error(err);
@@ -134,6 +152,11 @@ async function refresh() {
   } finally {
     loading = false;
     render();
+    if (queued) {
+      const next = queued;
+      queued = null;
+      refresh(next);
+    }
   }
 }
 
@@ -525,8 +548,13 @@ async function pushVote(patch, { debounce = false } = {}) {
   };
   const body = { ...base, ...patch };
 
-  // 화면은 먼저 움직이고, 저장은 뒤따라갑니다
+  // 화면은 먼저 움직이고, 저장은 뒤따라갑니다.
+  // 내 캐릭터가 바로 움직이려면 votes 배열 안의 내 행도 같이 손봐야 해요.
   S.mine = { ...(S.mine || {}), ...body, updated_at: new Date().toISOString() };
+  const pub = { ...body, show_nick: body.show_nick, is_me: true, updated_at: S.mine.updated_at };
+  const i = S.votes.findIndex((v) => v.is_me);
+  if (i >= 0) S.votes[i] = { ...S.votes[i], ...pub };
+  else S.votes = [...S.votes, pub];
   render();
 
   const run = async () => {
@@ -594,7 +622,7 @@ async function onHourStruck() {
   if (!db.configured) return;
   try {
     const row = await db.recordCheckpoint();
-    await refresh();
+    await refresh("all");
     if (row?.created && row.changed) {
       toast(`정각 확인 — ${fmt(row.applied)}°C → ${fmt(row.setpoint)}°C 로 바꿀 때예요`);
       notify(`온도 바꿀 시간`, `${fmt(row.applied)}°C → ${fmt(row.setpoint)}°C`);
@@ -681,7 +709,7 @@ function wire() {
   document.querySelector(".seasonseg").addEventListener("click", async (e) => {
     const btn = e.target.closest("button");
     if (!btn) return;
-    try { await db.saveConfig({ season: btn.dataset.season }); await refresh(); }
+    try { await db.saveConfig({ season: btn.dataset.season }); await refresh("meta"); }
     catch { toast("계절을 바꾸지 못했어요"); }
   });
 
@@ -689,7 +717,7 @@ function wire() {
     const c = summarise(S.votes, band());
     try {
       await db.saveConfig({ applied: c.setpoint, applied_at: new Date().toISOString() });
-      await refresh();
+      await refresh("meta");
       toast(`${fmt(c.setpoint)}°C 로 기록했어요`);
     } catch { toast("저장하지 못했어요"); }
   });
@@ -716,7 +744,7 @@ function wire() {
       });
       ta.value = "";
       $("counter").textContent = "0/300";
-      await refresh();
+      await refresh("posts");
     } catch (err) {
       console.error(err);
       toast("글을 올리지 못했어요");
@@ -736,7 +764,7 @@ function wire() {
         if (!confirm("이 글을 지울까요?")) return;
         await db.deletePost(id);
       }
-      await refresh();
+      await refresh("posts");
     } catch (err) { toast(err.message?.slice(0, 90) || "처리하지 못했어요"); }
   });
 
@@ -770,7 +798,7 @@ function wire() {
         indoor_at: new Date().toISOString(),
       });
       $("indoorModal").hidden = true;
-      await refresh();
+      await refresh("meta");
       toast("실내 값을 반영했어요");
     } catch { toast("저장하지 못했어요"); }
   });
@@ -778,7 +806,7 @@ function wire() {
     try {
       await db.saveConfig({ indoor_t: null, indoor_rh: null, indoor_at: null });
       $("indoorModal").hidden = true;
-      await refresh();
+      await refresh("meta");
     } catch { toast("저장하지 못했어요"); }
   });
 
@@ -856,10 +884,10 @@ async function boot() {
 
   setSave("아직 내 표 없음");
   await refresh();
-  db.subscribe(() => refresh());
+  db.subscribe((scope) => refresh(scope));
 
   // 이번 시간 도장이 아직이면 지금 찍어둡니다
-  db.recordCheckpoint().then((row) => { if (row?.created) refresh(); }).catch(() => {});
+  db.recordCheckpoint().then((row) => { if (row?.created) refresh("meta"); }).catch(() => {});
 
   // 알림은 사용자가 한 번 눌러야 물어봅니다 (자동으로 뜨면 다들 차단해 버려요)
   $("clockCard").addEventListener("click", () => {
