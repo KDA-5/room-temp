@@ -1,0 +1,19 @@
+{
+  "name": "room-temp",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "강의실 온도 합의판 — 익명 투표로 설정온도를 정하는 실시간 보드",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0"
+  }
+}

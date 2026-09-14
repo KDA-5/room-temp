@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="강의실 상태판">
+  <rect width="512" height="512" rx="112" fill="#eceff5"/>
+
+  <!-- 온도 축: 파랑에서 빨강으로 -->
+  <defs>
+    <linearGradient id="g" x1="96" y1="0" x2="416" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2a78d6"/>
+      <stop offset="0.5" stop-color="#cdd3dc"/>
+      <stop offset="1" stop-color="#e34948"/>
+    </linearGradient>
+  </defs>
+  <rect x="96" y="372" width="320" height="20" rx="10" fill="url(#g)"/>
+
+  <!-- 합의 타점 -->
+  <line x1="256" y1="120" x2="256" y2="410" stroke="#1b2430" stroke-width="14" stroke-linecap="round"/>
+
+  <!-- 캐릭터 한 마리 -->
+  <circle cx="204" cy="228" r="30" fill="#eb6834"/>
+  <circle cx="308" cy="228" r="30" fill="#eb6834"/>
+  <rect x="180" y="216" width="152" height="140" rx="68" ry="66" fill="#eb6834"/>
+  <ellipse cx="256" cy="302" rx="56" ry="48" fill="#fffdf7"/>
+  <path d="M 222 288 Q 233 275 244 288" fill="none" stroke="#2a3038" stroke-width="10" stroke-linecap="round"/>
+  <path d="M 268 288 Q 279 275 290 288" fill="none" stroke="#2a3038" stroke-width="10" stroke-linecap="round"/>
+  <path d="M 238 310 Q 256 326 274 310" fill="none" stroke="#2a3038" stroke-width="9" stroke-linecap="round"/>
+  <ellipse cx="214" cy="310" rx="13" ry="9" fill="#f3aab8"/>
+  <ellipse cx="298" cy="310" rx="13" ry="9" fill="#f3aab8"/>
+</svg>
