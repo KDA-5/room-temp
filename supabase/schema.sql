@@ -340,10 +340,13 @@ begin
     from votes
    where lec_at >= v_prev and lec_at < v_hour;
 
+  -- on conflict (hour_at) 로 쓰면 Postgres 가 거부합니다. returns table 의
+  -- hour_at 이 함수 안에서 변수로 잡혀서 테이블 컬럼과 헷갈리거든요.
+  -- 기본키 제약 이름으로 지목하면 그런 혼동이 없습니다.
   insert into checkpoints (hour_at, setpoint, applied, n, changed, diff_avg, pace_avg, lec_n)
   values (v_hour, v_set, v_cfg.applied, coalesce(v_n, 0), v_changed,
           v_diff, v_pace, coalesce(v_lecn, 0))
-  on conflict (hour_at) do nothing;
+  on conflict on constraint checkpoints_pkey do nothing;
 
   -- 실제로 내가 넣었을 때만 created=true. 두 사람이 같은 순간에 불러도
   -- 한쪽만 true 를 받아서 슬랙 알림이 두 번 나가지 않습니다.
