@@ -23,7 +23,7 @@ export const configured = Boolean(URL && KEY && !URL.includes("xxxxx"));
 export const supabase = configured
   ? createClient(URL, KEY, {
       auth: { persistSession: true, autoRefreshToken: true },
-      realtime: { params: { eventsPerSecond: 4 } },
+      realtime: { params: { eventsPerSecond: 12 } },
     })
   : null;
 

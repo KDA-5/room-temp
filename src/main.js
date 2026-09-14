@@ -114,7 +114,7 @@ function render() {
   const b = band();
   const c = summarise(S.votes, b);
 
-  drawTempBar($("tempBar"), c, b, myTemp());
+  drawTempBar($("tempBar"), c, b, myTemp(), myCfg());
   $("tempSummary").innerHTML = tempSummaryHTML(c, b, myTemp(), roomSize());
   paintWorld();
 
@@ -138,7 +138,15 @@ function paintWorld() {
     bgSig = sig;
   }
 
-  paintPeople($("people"), S.people.filter((p) => p.room === S.room), S.uid, S.prev);
+  // 내 캐릭터는 서버 왕복을 기다리지 않고 로컬 상태로 바로 그립니다.
+  // presence 응답을 기다리면 실시간 한도에 걸렸을 때 내가 안 움직여요.
+  const meKey = S.uid ?? "me";
+  const others = S.people.filter((p) => p.room === S.room && p.key !== meKey);
+  const me = {
+    key: meKey, room: S.room, x: S.pos.x, y: S.pos.y,
+    nick: S.me.nick || "익명", cfg: myCfg(), msg: S.msg, msgAt: S.msgAt,
+  };
+  paintPeople($("people"), [...others, me], meKey, S.prev);
 
   const room = ROOMS[S.room];
   $("roomName").textContent = `${room.icon} ${room.name}`;
@@ -152,13 +160,24 @@ function paintWorld() {
 }
 
 /* ── 세계 이동 ────────────────────────────────────────────────────────── */
+// 빨리 연달아 누르면 실시간 한도에 걸립니다. 260ms 간격으로 묶되
+// 마지막 위치는 반드시 한 번 더 보내서 남들 화면이 어긋나지 않게 합니다.
+let presTimer = null, presDirty = false;
 function pushPresence() {
   if (!S.pos) return;
-  db.setPresence({
-    room: S.room, x: S.pos.x, y: S.pos.y,
-    nick: S.me.nick || "익명", cfg: myCfg(),
-    msg: S.msg || "", msgAt: S.msgAt || 0,
-  });
+  presDirty = true;
+  if (presTimer) return;
+  const send = () => {
+    if (!presDirty) { presTimer = null; return; }
+    presDirty = false;
+    db.setPresence({
+      room: S.room, x: S.pos.x, y: S.pos.y,
+      nick: S.me.nick || "익명", cfg: myCfg(),
+      msg: S.msg || "", msgAt: S.msgAt || 0,
+    });
+    presTimer = setTimeout(send, 260);
+  };
+  send();
 }
 
 function moveTo(pos) {
@@ -166,6 +185,7 @@ function moveTo(pos) {
   const through = doorAt(S.room, pos);
   if (through) return gotoRoom(through);
   S.pos = pos;
+  paintWorld();          // 서버를 기다리지 않고 바로 걸어갑니다
   pushPresence();
   syncZone();
   $("floorTip").style.opacity = "0";
@@ -419,6 +439,7 @@ function wire() {
   // 세계 — 바닥을 누르면 걸어감
   $("roomWrap").addEventListener("pointerdown", (e) => {
     if (e.target.closest(".person, .doorbtn")) return;
+    if (e.target.closest(".door")) return gotoRoom(ROOMS[S.room].door.to);
     moveTo(pointToPos(e, $("roomWrap")));
   });
   $("doorBtn").addEventListener("click", () => gotoRoom(ROOMS[S.room].door.to));
