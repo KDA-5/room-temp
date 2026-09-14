@@ -228,23 +228,24 @@ let onChange = () => {};
 let onPeers = () => {};
 let onYard = () => {};
 let onReact = () => {};
-let myYard = null;   // 마당에 있을 때의 내 좌표 (0~100). 없으면 마당 밖
+let myState = null;   // 지금 내 위치·방·한마디. 없으면 세계에 안 나타납니다
 
 /**
- * 마당 — 접속한 사람들의 위치를 실시간으로 주고받습니다.
+ * 세계 — 접속한 사람들의 방·위치·말풍선을 실시간으로 주고받습니다.
  *
- * 위치는 DB 에 저장하지 않습니다. presence(접속 상태)에만 얹어서
- * 브라우저를 닫으면 그 자리에서 사라져요. 나중에 "누가 어디 있었나"를
- * 되짚어볼 수조차 없습니다.
+ * 이건 DB 에 저장하지 않습니다. presence(접속 상태)에만 얹어서
+ * 창을 닫으면 그 자리에서 사라져요. 나중에 "누가 어디 있었나"를
+ * 되짚어볼 수조차 없습니다. 저장되는 건 "어느 구역"뿐이고,
+ * 그것도 votes 테이블에 구역 번호 하나로만 들어갑니다.
  *
  * 탭한 순간 목적지 하나만 보내고, 걸어가는 건 각자 화면에서 계산합니다.
- * 방향키처럼 계속 쏘면 메시지가 27배로 뛰어요.
+ * 방향키처럼 위치를 계속 쏘면 실시간 메시지가 27배로 뛰어요.
  */
-export function setYard(pos) {
-  myYard = pos;
-  if (channel) channel.track({ at: Date.now(), yard: myYard }).catch(() => {});
+export function setPresence(state) {
+  myState = state;
+  if (channel) channel.track({ at: Date.now(), me: myState }).catch(() => {});
 }
-export function watchYard(handler) { onYard = handler; }
+export function watchPeople(handler) { onYard = handler; }
 
 /** 리액션 — 지나가기만 하고 아무 데도 안 남습니다. */
 export function sendReact(emoji, from) {
@@ -310,7 +311,7 @@ export function subscribe(handler) {
     const people = [];
     for (const [key, metas] of Object.entries(state)) {
       const m = metas[metas.length - 1];
-      if (m?.yard) people.push({ key, ...m.yard });
+      if (m?.me) people.push({ key, ...m.me });
     }
     onYard(people);
   });
@@ -318,7 +319,7 @@ export function subscribe(handler) {
     if (msg?.payload) onReact(msg.payload);
   });
   channel.subscribe((status) => {
-    if (status === "SUBSCRIBED") channel.track({ at: Date.now(), yard: myYard }).catch(() => {});
+    if (status === "SUBSCRIBED") channel.track({ at: Date.now(), me: myState }).catch(() => {});
   });
 
   let lastFull = Date.now();
