@@ -323,7 +323,11 @@ export function gaugeSVG(value, n, labels, tone = "neutral") {
   return `<svg viewBox="0 0 ${W} ${H}" class="gauge" role="img" aria-label="${esc(labels[1])} 게이지">${out.join("")}</svg>`;
 }
 
-/** 자리 구역 미니 지도 (앞/뒤 × 창가/가운데/복도). */
+/**
+ * 자리 구역 미니 지도 (앞/뒤 × 왼쪽/오른쪽).
+ * 각 칸에 그 구역을 때리는 에어컨을 같이 표시해서,
+ * "어느 유닛을 건드려야 하는지"까지 한 화면에서 읽히게 합니다.
+ */
 export function zoneMapHTML(rows, mine, overallAvg) {
   return rows
     .map((z) => {
@@ -337,11 +341,15 @@ export function zoneMapHTML(rows, mine, overallAvg) {
       } else if (z.n) {
         sub = `${z.n}명`;
       }
+      // 이 구역에서 바람을 약하게 해달라는 소리가 나오면 표시합니다
+      const windy = z.windN >= 2 && z.windAvg <= -0.5 ? '<span class="zwind">💨 바람 셈</span>' : "";
       return (
-        `<button class="zone ${cls}" type="button" data-zone="${z.i}" aria-pressed="${on}">` +
+        `<button class="zone ${cls}" type="button" data-zone="${z.i}" aria-pressed="${on}" ` +
+        `title="${esc(z.acName)}">` +
+        `<span class="zac">${z.ac} ${esc(z.acName)}</span>` +
         `<span class="zname">${esc(z.name)}</span>` +
         `<span class="zval">${sub}</span>` +
-        `<span class="zn">${z.n}명</span>` +
+        `<span class="zn">${z.n}명${windy ? " · " : ""}</span>${windy}` +
         `</button>`
       );
     })

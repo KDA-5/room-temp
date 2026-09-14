@@ -131,7 +131,7 @@
     <div class="card-head">
       <div>
         <h2>자리별로 보면</h2>
-        <p class="hint">의견이 갈리는 건 대부분 온도가 아니라 자리 문제예요. 내 자리를 눌러두면 어디가 추운지 드러납니다.</p>
+        <p class="hint">창문이 없으니 온도 편차의 원인은 거의 에어컨 바람입니다. 내 자리를 눌러두면 어느 유닛이 범인인지 드러나요.</p>
       </div>
     </div>
     <div class="zonewrap">
@@ -139,7 +139,8 @@
       <div class="zonelegend">
         <span><i class="sw cold"></i>더 따뜻하길 원함 (= 그 자리가 추움)</span>
         <span><i class="sw hot"></i>더 시원하길 원함 (= 그 자리가 더움)</span>
-        <span class="dim">4명 이상 모인 구역만 평균이 공개돼요</span>
+        <span class="dim">칸마다 그 구역을 때리는 에어컨이 적혀 있어요</span>
+        <span class="dim">4명 이상 모인 구역만 평균이 공개됩니다</span>
       </div>
     </div>
     <p class="insight" id="zoneInsight">자리를 고른 사람이 늘면 여기에 분석이 뜹니다.</p>
@@ -194,6 +195,17 @@
       <button class="feel" type="button" data-feel="2" aria-pressed="false"><em>🥵</em>더워요</button>
     </div>
     <p class="nowline" id="nowLine">응답이 모이면 지금 상태가 보입니다.</p>
+
+    <hr class="rule">
+
+    <h3>바람은 어때요?</h3>
+    <p class="hint">창문이 없어서 에어컨이 유일한 공기 흐름이에요. 온도는 괜찮은데 바람이 문제일 때 눌러주세요. 3시간만 반영됩니다.</p>
+    <div class="windrow" id="windRow" role="group" aria-label="바람 요청">
+      <button class="feel" type="button" data-wind="-1" aria-pressed="false"><em>🍃</em>약하게</button>
+      <button class="feel" type="button" data-wind="0" aria-pressed="false"><em>👌</em>지금 딱 좋아요</button>
+      <button class="feel" type="button" data-wind="1" aria-pressed="false"><em>💨</em>세게</button>
+    </div>
+    <p class="nowline" id="windLine">바람 요청이 모이면 여기에 정리됩니다.</p>
   </section>
 
   <!-- ── 강의 피드백 ───────────────────────────────────── -->
@@ -312,6 +324,36 @@
       <p class="hint" id="sparkNote">기록이 쌓이면 선이 그려져요.</p>
     </div>
   </section>
+
+  <details id="drawPanel">
+    <summary>🎲 조 뽑기 · 발표 순서</summary>
+    <div class="detailbody">
+      <p class="hint" id="drawPool">최근 7일 안에 표를 낸 사람 중에서 뽑습니다.</p>
+
+      <hr class="rule">
+      <h3>조 뽑기</h3>
+      <div class="drawbar">
+        <span class="dim">몇 조로?</span>
+        <button class="mini" type="button" data-groups="3">3조</button>
+        <button class="mini" type="button" data-groups="4">4조</button>
+        <button class="mini" type="button" data-groups="5">5조</button>
+        <button class="mini" type="button" data-groups="6">6조</button>
+        <button class="mini" type="button" id="groupsClear">지우기</button>
+      </div>
+      <div class="groups" id="groups"></div>
+
+      <hr class="rule">
+      <h3>발표 순서 룰렛</h3>
+      <p class="hint">이미 뽑힌 사람은 빼고 고릅니다. 한 바퀴 다 돌면 알아서 초기화돼요.</p>
+      <div class="drawbar">
+        <button class="btn accent" type="button" id="pickBtn">🎯 뽑기</button>
+        <button class="mini" type="button" id="pickReset">기록 지우기</button>
+        <span class="dim" id="pickLeft"></span>
+      </div>
+      <div id="pickWrap"></div>
+      <div class="picklist" id="pickList"></div>
+    </div>
+  </details>
 
   <details>
     <summary>타점은 이렇게 정해집니다</summary>

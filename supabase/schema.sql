@@ -480,3 +480,40 @@ begin
 end $$;
 
 grant execute on function public.toggle_answered(uuid) to authenticated;
+
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  추가분 — 바람 요청 · 조 뽑기 · 발표 룰렛
+-- ═══════════════════════════════════════════════════════════════════════
+
+-- ── 바람 요청 ───────────────────────────────────────────────────────────
+-- 창문이 없는 강의실이라 에어컨이 유일한 공기 흐름원입니다.
+-- 그래서 "몇 도"보다 "바람"이 문제인 경우가 많아요.
+-- -1 약하게 · 0 괜찮음 · +1 세게. 체감처럼 3시간만 유효합니다.
+alter table public.votes add column if not exists wind    smallint;
+alter table public.votes add column if not exists wind_at timestamptz;
+
+alter table public.votes drop constraint if exists votes_wind_check;
+alter table public.votes add constraint votes_wind_check check (wind between -1 and 1);
+
+-- 구역이 4칸으로 줄었습니다 (앞/뒤 × 왼쪽/오른쪽).
+-- 옛 6칸 데이터가 남아 있어도 제약에 안 걸리게 범위는 넉넉히 둡니다.
+drop view if exists public.votes_public;
+create view public.votes_public
+with (security_invoker = off) as
+  select t, s, s_at, nick, cc, ce, ch, cp, ci, show_nick, zone,
+         diff, pace, lec_at, wind, wind_at, updated_at,
+         (uid = auth.uid()) as is_me
+  from public.votes;
+
+grant select on public.votes_public to anon, authenticated;
+
+-- 구역이 6칸 → 4칸으로 줄었으니, 범위 밖 값은 "안 고름"으로 되돌립니다.
+update public.votes set zone = null where zone is not null and zone > 3;
+
+
+-- ── 조 뽑기 · 발표 룰렛 ─────────────────────────────────────────────────
+-- 뽑은 결과를 저장해 둬야 36명이 같은 화면을 봅니다.
+-- 각자 브라우저에서 돌리면 전부 다른 결과가 나와서 싸움이 나요.
+alter table public.config add column if not exists draw_groups jsonb;   -- {n, at, groups:[[nick,…],…]}
+alter table public.config add column if not exists draw_pick   jsonb;   -- {at, current, history:[nick,…]}

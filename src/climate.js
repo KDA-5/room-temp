@@ -27,16 +27,22 @@ export function resolveSeason(key) {
 }
 
 // ── 자리 구역 ────────────────────────────────────────────────────────────
-// 의견이 두 갈래로 갈리는 건 대부분 온도가 아니라 자리 문제입니다.
-// 에어컨 바로 아래에 앉은 사람과 창가에 앉은 사람은 같은 설정에서
-// 실제로 2~3도 다르게 느껴요. 그래서 구역을 물어봅니다.
+// 의견이 두 갈래로 갈리는 건 대부분 온도가 아니라 "어느 에어컨 바람을 맞느냐"입니다.
+//
+// 이 강의실은 창문이 없고 에어컨이 셋입니다.
+//   · 천장(앞)  — 두 블록 사이 통로 앞쪽. 앞줄 양쪽에 다 걸립니다
+//   · 천장(뒤)  — 오른쪽 블록 뒤쪽 바로 위
+//   · 스탠드    — 왼쪽 블록 맨 뒤
+// 그래서 앞/뒤 × 왼쪽/오른쪽 네 칸이면 각 칸이 서로 다른 유닛에 대응합니다.
+//
+// 자리표를 그대로 넣어 "내 자리 고르기"를 만들면 안 됩니다. 자리표엔 이름이
+// 적혀 있어서, 자리를 고르는 순간 이름을 대는 것과 같아지거든요. 구역 4칸이면
+// 한 칸에 8~10명이 들어가서 필요한 정보는 다 얻으면서 역추적은 막힙니다.
 export const ZONES = [
-  { i: 0, name: "앞 · 창가",   row: 0, col: 0 },
-  { i: 1, name: "앞 · 가운데", row: 0, col: 1 },
-  { i: 2, name: "앞 · 복도",   row: 0, col: 2 },
-  { i: 3, name: "뒤 · 창가",   row: 1, col: 0 },
-  { i: 4, name: "뒤 · 가운데", row: 1, col: 1 },
-  { i: 5, name: "뒤 · 복도",   row: 1, col: 2 },
+  { i: 0, name: "앞 · 왼쪽",   ac: "🌬️", acName: "천장(앞) 통로 쪽" },
+  { i: 1, name: "앞 · 오른쪽", ac: "🌬️", acName: "천장(앞) 통로 · 앞문" },
+  { i: 2, name: "뒤 · 왼쪽",   ac: "🗄️", acName: "스탠드 에어컨 옆" },
+  { i: 3, name: "뒤 · 오른쪽", ac: "🌬️", acName: "천장(뒤) 바로 아래" },
 ];
 
 /**
@@ -47,9 +53,18 @@ export const ZONE_MIN = 4;
 
 export function zoneBreakdown(votes) {
   const rows = ZONES.map((z) => {
-    const xs = votes.filter((v) => v.zone === z.i).map((v) => v.t).filter(Number.isFinite);
+    const inZone = votes.filter((v) => v.zone === z.i);
+    const xs = inZone.map((v) => v.t).filter(Number.isFinite);
     const avg = xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null;
-    return { ...z, n: xs.length, avg, shown: xs.length >= ZONE_MIN };
+
+    // 이 구역에서 최근 3시간 안에 들어온 바람 요청
+    const now = Date.now();
+    const winds = inZone
+      .filter((v) => v.wind !== null && v.wind !== undefined && v.wind_at && now - Date.parse(v.wind_at) < 3 * 3600e3)
+      .map((v) => Number(v.wind));
+    const windAvg = winds.length ? winds.reduce((a, b) => a + b, 0) / winds.length : null;
+
+    return { ...z, n: xs.length, avg, shown: xs.length >= ZONE_MIN, windN: winds.length, windAvg };
   });
 
   const shown = rows.filter((r) => r.shown);
@@ -59,7 +74,30 @@ export function zoneBreakdown(votes) {
     const lo = shown.reduce((a, b) => (b.avg < a.avg ? b : a));
     if (hi.avg - lo.avg >= 0.8) spread = { hi, lo, gap: hi.avg - lo.avg };
   }
-  return { rows, spread };
+
+  // 바람을 가장 약하게 해달라는 구역 — 그 구역 유닛이 범인입니다
+  const blasted = rows
+    .filter((r) => r.windN >= 2 && r.windAvg <= -0.5)
+    .sort((a, b) => a.windAvg - b.windAvg)[0] || null;
+
+  return { rows, spread, blasted };
+}
+
+// ── 바람 요청 ────────────────────────────────────────────────────────────
+export const WIND_MS = 3 * 3600e3;
+
+export function windSummary(votes) {
+  const now = Date.now();
+  const vals = votes
+    .filter((v) => v.wind !== null && v.wind !== undefined && v.wind_at && now - Date.parse(v.wind_at) < WIND_MS)
+    .map((v) => Number(v.wind));
+  if (!vals.length) return { n: 0, avg: 0, up: 0, down: 0 };
+  return {
+    n: vals.length,
+    avg: vals.reduce((a, b) => a + b, 0) / vals.length,
+    up: vals.filter((v) => v > 0).length,
+    down: vals.filter((v) => v < 0).length,
+  };
 }
 
 // ── 날씨 · 습도 ──────────────────────────────────────────────────────────
@@ -151,8 +189,8 @@ export function humidityAdvice(rh, indoor) {
 // ── 오늘의 잡학 ──────────────────────────────────────────────────────────
 // 날짜로 돌아가면서 하루에 하나씩 보여줍니다.
 export const TRIVIA = [
-  "냉방 설정을 1도 올리면 소비 전력이 약 7% 줄어듭니다. 33명이 하루 8시간 쓰는 강의실이면 무시 못 할 차이예요.",
-  "가만히 앉아 있는 사람 한 명이 약 100W의 열을 냅니다. 33명이면 전기난로 두 대를 켜 둔 셈이에요. 사람이 다 들어차면 방이 실제로 더워집니다.",
+  "냉방 설정을 1도 올리면 소비 전력이 약 7% 줄어듭니다. 36명이 하루 8시간 쓰는 강의실이면 무시 못 할 차이예요.",
+  "가만히 앉아 있는 사람 한 명이 약 100W의 열을 냅니다. 36명이면 전기난로 두 대를 켜 둔 셈이에요. 사람이 다 들어차면 방이 실제로 더워집니다.",
   "습도가 10% 오르면 체감 온도는 약 0.5도 올라갑니다. 장마철에 같은 26도가 유난히 더운 이유입니다.",
   "실내 권장 습도는 40~60%입니다. 이보다 낮으면 바이러스가 공기 중에 오래 살아남고, 높으면 곰팡이와 집먼지진드기가 늘어요.",
   "ASHRAE 기준으로 '전원 만족'은 애초에 목표가 아닙니다. 80% 만족이 최선이에요. 20%는 항상 불만인 게 정상입니다.",

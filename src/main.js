@@ -19,8 +19,9 @@ import {
   resolveSeason, SEASONS, ZONES, ZONE_MIN, zoneBreakdown,
   fetchWeather, weatherLabel, discomfortIndex, discomfortLabel,
   adaptiveComfort, humidityAdvice, triviaOfToday, TRIVIA,
-  msToNextHour, countdownText, hhmm,
+  msToNextHour, countdownText, hhmm, windSummary, WIND_MS,
 } from "./climate.js";
+import { makeGroups, pickOne, toMembers } from "./draw.js";
 import { drawRidge, drawSpark, drawHourly, drawLectureTrend, gaugeSVG, zoneMapHTML, P } from "./chart.js";
 import { feedHTML, openQuestions, KINDS, MAX_PIN } from "./board.js";
 
@@ -175,6 +176,7 @@ function render() {
   renderLecture();
   renderWeather(b);
   renderBoard();
+  renderDraw();
   renderRecords();
   renderTable(c);
   $("mBand").textContent = `${b.short} ${b.lo}–${b.hi}°C`;
@@ -383,6 +385,84 @@ function renderMe(c, b) {
     else { label = m < -1 ? "춥다" : "살짝 춥다"; advice = `지금 당장 ${m < -1 ? "1.0" : "0.5"}°C 올리거나 송풍을 약하게 해보세요.`; }
     nl.innerHTML = `지금 교실 — <strong>${label}</strong> (최근 3시간 ${vals.length}명, 평균 ${m > 0 ? "+" : ""}${m.toFixed(1)}). ${advice}`;
   }
+
+  renderWind();
+}
+
+/**
+ * 바람 요청.
+ * 창문이 없는 방이라 에어컨이 유일한 공기 흐름원입니다. 그래서
+ * "몇 도"가 아니라 "바람"이 문제인 경우를 따로 받습니다.
+ */
+function renderWind() {
+  const wAt = S.mine?.wind_at ? Date.parse(S.mine.wind_at) : 0;
+  const live = Date.now() - wAt < WIND_MS;
+  document.querySelectorAll("#windRow .feel").forEach((el) => {
+    el.setAttribute("aria-pressed", String(live && String(S.mine?.wind) === el.dataset.wind));
+  });
+
+  const w = windSummary(S.votes);
+  const el = $("windLine");
+  if (w.n < 2) {
+    el.textContent = `최근 3시간 바람 요청이 ${w.n}개예요. 온도는 괜찮은데 바람이 문제일 때 눌러주세요.`;
+    return;
+  }
+
+  const { blasted } = zoneBreakdown(S.votes);
+  let head;
+  if (Math.abs(w.avg) < 0.3) head = "지금 바람 세기는 <strong>대체로 괜찮다</strong>는 쪽이에요";
+  else if (w.avg < 0) head = `<strong>${w.down}명</strong>이 바람을 약하게 해달라고 합니다`;
+  else head = `<strong>${w.up}명</strong>이 바람을 세게 해달라고 합니다`;
+
+  const tail = blasted
+    ? ` 특히 <strong>${esc(blasted.name)}</strong>(${esc(blasted.acName)})에서 소리가 나와요 — 온도를 올리기 전에 그 유닛 풍향부터 돌려보세요.`
+    : " 구역이 갈리지 않으니 세기만 한 단계 조절하면 됩니다.";
+
+  el.innerHTML = `${head} (최근 3시간 ${w.n}명).${tail}`;
+}
+
+// ── 조 뽑기 · 발표 룰렛 ────────────────────────────────────────────────
+function drawMembers() {
+  return toMembers(S.votes);
+}
+
+function renderDraw() {
+  const members = drawMembers();
+  $("drawPool").textContent = `최근 7일 안에 표를 낸 ${members.length}명 중에서 뽑습니다. 실명은 안 쓰고 닉네임·캐릭터로만 나와요.`;
+
+  // 조 뽑기 결과
+  const g = S.config?.draw_groups;
+  const box = $("groups");
+  if (!g?.groups?.length) {
+    box.innerHTML = `<p class="empty">위에서 조 개수를 누르면 여기에 결과가 나옵니다.</p>`;
+  } else {
+    box.innerHTML = g.groups
+      .map(
+        (grp, i) =>
+          `<div class="group"><h4>${i + 1}조 · ${grp.length}명</h4>` +
+          grp.map((m) => `<div class="member">${creatureSVG(m.cfg, "happy")}<span>${esc(m.nick)}</span></div>`).join("") +
+          `</div>`
+      )
+      .join("");
+  }
+
+  // 발표 룰렛
+  const pk = S.config?.draw_pick;
+  const wrap = $("pickWrap");
+  if (!pk?.current) {
+    wrap.innerHTML = `<p class="empty">🎯 뽑기를 누르면 한 명이 나옵니다.</p>`;
+  } else {
+    wrap.innerHTML =
+      `<div class="pickbox" id="pickBox">${creatureSVG(pk.current.cfg, "happy")}` +
+      `<div class="pickname">${esc(pk.current.nick)}</div></div>`;
+  }
+
+  const hist = pk?.history ?? [];
+  const done = members.filter((m) => hist.includes(m.key));
+  $("pickLeft").textContent = members.length
+    ? `${done.length} / ${members.length}명 뽑음`
+    : "아직 표를 낸 사람이 없어요";
+  $("pickList").innerHTML = done.map((m) => `<span>${esc(m.nick)}</span>`).join("");
 }
 
 function renderAxes() {
@@ -722,6 +802,60 @@ function wire() {
     if (!btn) return;
     const on = btn.getAttribute("aria-pressed") === "true";
     pushVote({ s: on ? null : Number(btn.dataset.feel), s_at: on ? null : new Date().toISOString() });
+  });
+
+  $("windRow").addEventListener("click", (e) => {
+    const btn = e.target.closest(".feel");
+    if (!btn) return;
+    const on = btn.getAttribute("aria-pressed") === "true";
+    pushVote({ wind: on ? null : Number(btn.dataset.wind), wind_at: on ? null : new Date().toISOString() });
+  });
+
+  // 조 뽑기 — 결과를 서버에 저장해야 36명이 같은 화면을 봅니다
+  $("drawPanel").addEventListener("click", async (e) => {
+    const gb = e.target.closest("[data-groups]");
+    if (gb) {
+      const members = drawMembers();
+      if (members.length < 2) return toast("표를 낸 사람이 너무 적어요");
+      const n = Number(gb.dataset.groups);
+      try {
+        await db.saveConfig({ draw_groups: { n, at: new Date().toISOString(), groups: makeGroups(members, n) } });
+        await refresh("meta");
+        toast(`${n}개 조로 나눴어요 🎲`);
+      } catch { toast("뽑지 못했어요"); }
+      return;
+    }
+    if (e.target.closest("#groupsClear")) {
+      try { await db.saveConfig({ draw_groups: null }); await refresh("meta"); } catch { /* 조용히 */ }
+    }
+  });
+
+  $("pickBtn").addEventListener("click", async () => {
+    const members = drawMembers();
+    if (!members.length) return toast("아직 표를 낸 사람이 없어요");
+
+    const res = pickOne(members, S.config?.draw_pick?.history ?? []);
+    if (!res) return;
+
+    // 뽑히는 맛이 있어야 하니 잠깐 흔들어 줍니다
+    const box = $("pickBox");
+    const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (box && !still) {
+      box.classList.add("rolling");
+      await new Promise((r) => setTimeout(r, 600));
+    }
+
+    try {
+      await db.saveConfig({
+        draw_pick: { at: new Date().toISOString(), current: res.picked, history: res.history },
+      });
+      await refresh("meta");
+      if (res.wrapped) toast("한 바퀴 다 돌아서 새로 시작합니다");
+    } catch { toast("뽑지 못했어요"); }
+  });
+
+  $("pickReset").addEventListener("click", async () => {
+    try { await db.saveConfig({ draw_pick: null }); await refresh("meta"); } catch { /* 조용히 */ }
   });
 
   for (const [rowId, key] of [["diffRow", "diff"], ["paceRow", "pace"]]) {
