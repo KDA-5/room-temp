@@ -29,7 +29,6 @@ const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 
 const FEEL_MS = 3 * 3600e3;
 const DEADBAND = 0.5;
-const VENT_MS = 50 * 60e3;   // 사람 찬 교실은 50분이면 CO2 가 올라옵니다
 const ENV_SIZE = Number(import.meta.env.VITE_ROOM_SIZE) || 36;
 const LAT = Number(import.meta.env.VITE_LAT) || 37.5665;
 const LON = Number(import.meta.env.VITE_LON) || 126.978;
@@ -634,7 +633,7 @@ function tickClock() {
     // 쉬는 시간이 최우선. 시계 카드가 통째로 모드를 바꿉니다.
     $("clockLabel").textContent = "쉬는 시간 남은 시간";
     $("countdown").textContent = countdownText(brk.left);
-    $("clockNote").textContent = "끝나기 1분 전에 알려드릴게요. 화장실·환기 다녀오세요 ☕";
+    $("clockNote").textContent = "끝나기 1분 전에 알려드릴게요. 잠깐 일어나서 복도라도 다녀오세요 ☕";
     $("nextLabel").textContent = "끝나는 시각";
     $("nextHour").textContent = hhmm(brk.until);
     $("ringArc").setAttribute("stroke-dashoffset", String((RING_C * (1 - clamp(brk.left / brk.total, 0, 1))).toFixed(1)));
@@ -672,25 +671,10 @@ function tickClock() {
   }
 }
 
-/** 쉬는 시간 버튼 · 환기 · 접속자 수 줄. */
+/** 쉬는 시간 버튼 · 접속자 수 줄. */
 function renderClockBar(brk) {
   $("breakSet").hidden = !!brk;
   $("breakOn").hidden = !brk;
-
-  const vented = S.config?.vented_at ? Date.parse(S.config.vented_at) : 0;
-  const note = $("ventNote");
-  if (!vented) {
-    note.textContent = "환기 기록 없음";
-    note.className = "ventnote";
-  } else {
-    const ago = Date.now() - vented;
-    const mins = Math.floor(ago / 60e3);
-    const due = ago > VENT_MS;
-    note.textContent = due
-      ? `${mins}분째 — 창문 열 때가 됐어요`
-      : `${mins}분 전 환기함`;
-    note.className = `ventnote ${due ? "due" : ""}`;
-  }
 
   const peers = $("peers");
   peers.hidden = S.peers < 2;
@@ -827,15 +811,6 @@ function wire() {
       await db.saveConfig({ break_until: null, break_label: null });
       await refresh("meta");
     } catch { toast("끝내지 못했어요"); }
-  });
-
-  // 환기
-  $("ventBtn").addEventListener("click", async () => {
-    try {
-      await db.saveConfig({ vented_at: new Date().toISOString() });
-      await refresh("meta");
-      toast("환기 기록했어요 🪟");
-    } catch { toast("기록하지 못했어요"); }
   });
 
   // 게시판 갈래 필터
