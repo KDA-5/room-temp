@@ -19,16 +19,17 @@ import {
   resolveSeason, SEASONS, ZONES, ZONE_MIN, zoneBreakdown,
   fetchWeather, weatherLabel, discomfortIndex, discomfortLabel,
   adaptiveComfort, humidityAdvice, triviaOfToday, TRIVIA,
-  msToNextHour, countdownText,
+  msToNextHour, countdownText, hhmm,
 } from "./climate.js";
 import { drawRidge, drawSpark, drawHourly, drawLectureTrend, gaugeSVG, zoneMapHTML, P } from "./chart.js";
-import { feedHTML, MAX_PIN } from "./board.js";
+import { feedHTML, openQuestions, KINDS, MAX_PIN } from "./board.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 const FEEL_MS = 3 * 3600e3;
 const DEADBAND = 0.5;
+const VENT_MS = 50 * 60e3;   // 사람 찬 교실은 50분이면 CO2 가 올라옵니다
 const ENV_SIZE = Number(import.meta.env.VITE_ROOM_SIZE) || 36;
 const LAT = Number(import.meta.env.VITE_LAT) || 37.5665;
 const LON = Number(import.meta.env.VITE_LON) || 126.978;
@@ -40,9 +41,12 @@ const S = {
   me: null,            // 닉네임 · 캐릭터 (로컬에도 저장)
   weather: null,
   kind: "chat",
+  filter: "all",       // 게시판 갈래 필터
+  peers: 0,            // 지금 같이 보고 있는 사람 수
   triviaIdx: null,
   ready: false,
   lastHour: null,
+  breakSeen: null,     // 이 쉬는 시간의 종료 알림을 이미 띄웠는지
 };
 
 // ── 로컬 저장 ───────────────────────────────────────────────────────────
@@ -137,6 +141,7 @@ async function refresh(scope = "all") {
   try {
     const data =
       scope === "votes" ? await db.readVotes()
+      : scope === "live" ? await db.readLive()
       : scope === "posts" ? await db.readPosts()
       : scope === "meta" ? await db.readMeta()
       : await db.readAll();
@@ -498,9 +503,25 @@ function renderTrivia() {
 
 // ── 게시판 ──────────────────────────────────────────────────────────────
 function renderBoard() {
-  $("feed").innerHTML = feedHTML(S.posts, db.myUid());
+  // 갈래별 개수를 세서 탭에 같이 보여줍니다. 0개인 갈래도 남겨둬야
+  // 누르는 자리가 안 움직여요.
+  const count = (k) => (k === "all" ? S.posts.length : S.posts.filter((p) => p.kind === k).length);
+  $("filters").innerHTML = KINDS.map(
+    (k) =>
+      `<button type="button" data-filter="${k.key}" aria-pressed="${S.filter === k.key}">` +
+      `${esc(k.label)}<span class="n">${count(k.key)}</span></button>`
+  ).join("");
+
+  $("feed").innerHTML = feedHTML(S.posts, db.myUid(), S.filter);
+
   const pinned = S.posts.filter((p) => p.pinned).length;
   $("pinCount").textContent = `고정 ${pinned} / ${MAX_PIN}`;
+
+  const open = openQuestions(S.posts);
+  const badge = $("openQ");
+  badge.hidden = open === 0;
+  badge.textContent = `❓ 답변 대기 ${open}`;
+  badge.className = open ? "chip alert" : "chip";
 }
 
 // ── 기록 · 표 ───────────────────────────────────────────────────────────
@@ -596,27 +617,84 @@ function queueHistory() {
 // ── 정각 리듬 ───────────────────────────────────────────────────────────
 const RING_C = 2 * Math.PI * 36;
 
+/** 쉬는 시간이 돌고 있으면 { left, total } 을, 아니면 null. */
+function breakState() {
+  const until = S.config?.break_until ? Date.parse(S.config.break_until) : 0;
+  const left = until - Date.now();
+  if (!(left > 0)) return null;
+  const mins = Number(S.config?.break_label) || 10;
+  return { left, total: mins * 60e3, until };
+}
+
 function tickClock() {
-  const left = msToNextHour();
-  $("countdown").textContent = countdownText(left);
+  const brk = breakState();
+  const card = $("clockCard");
 
-  const next = new Date(Date.now() + left);
-  $("nextHour").textContent = `${next.getHours()}시 00분`;
+  if (brk) {
+    // 쉬는 시간이 최우선. 시계 카드가 통째로 모드를 바꿉니다.
+    $("clockLabel").textContent = "쉬는 시간 남은 시간";
+    $("countdown").textContent = countdownText(brk.left);
+    $("clockNote").textContent = "끝나기 1분 전에 알려드릴게요. 화장실·환기 다녀오세요 ☕";
+    $("nextLabel").textContent = "끝나는 시각";
+    $("nextHour").textContent = hhmm(brk.until);
+    $("ringArc").setAttribute("stroke-dashoffset", String((RING_C * (1 - clamp(brk.left / brk.total, 0, 1))).toFixed(1)));
+    $("clockIcon").textContent = brk.left < 60e3 ? "🔔" : "☕";
+    card.classList.add("onbreak");
+    card.classList.remove("due");
+    S.breakSeen = brk.until;
+  } else {
+    if (S.breakSeen) {
+      // 방금 끝났습니다
+      toast("쉬는 시간 끝 — 자리로 돌아와 주세요 🙌");
+      notify("쉬는 시간 끝", "자리로 돌아와 주세요");
+      S.breakSeen = null;
+    }
+    const left = msToNextHour();
+    const next = new Date(Date.now() + left);
+    $("clockLabel").textContent = "다음 조절 확인까지";
+    $("countdown").textContent = countdownText(left);
+    $("clockNote").textContent = '매 정각에 그 시점 표를 모아서 "바꿀지 말지"를 판단합니다. 매 분 들여다볼 순 없으니까요.';
+    $("nextLabel").textContent = "다음 정각";
+    $("nextHour").textContent = `${next.getHours()}시 00분`;
+    $("ringArc").setAttribute("stroke-dashoffset", String((RING_C * (1 - clamp(left / 3600e3, 0, 1))).toFixed(1)));
+    $("clockIcon").textContent = left < 60e3 ? "🔔" : left < 300e3 ? "⏰" : "⏳";
+    card.classList.toggle("due", left < 60e3);
+    card.classList.remove("onbreak");
+  }
 
-  const p = clamp(left / 3600e3, 0, 1);
-  $("ringArc").setAttribute("stroke-dashoffset", String((RING_C * (1 - p)).toFixed(1)));
+  renderClockBar(brk);
 
-  const due = left < 60e3;
-  $("clockCard").classList.toggle("due", due);
-  $("clockIcon").textContent = due ? "🔔" : left < 300e3 ? "⏰" : "⏳";
-
-  // 시간이 바뀌었으면 도장을 찍습니다
   const hour = startOfHour();
   if (S.lastHour === null) S.lastHour = hour;
   else if (hour !== S.lastHour) {
     S.lastHour = hour;
     onHourStruck();
   }
+}
+
+/** 쉬는 시간 버튼 · 환기 · 접속자 수 줄. */
+function renderClockBar(brk) {
+  $("breakSet").hidden = !!brk;
+  $("breakOn").hidden = !brk;
+
+  const vented = S.config?.vented_at ? Date.parse(S.config.vented_at) : 0;
+  const note = $("ventNote");
+  if (!vented) {
+    note.textContent = "환기 기록 없음";
+    note.className = "ventnote";
+  } else {
+    const ago = Date.now() - vented;
+    const mins = Math.floor(ago / 60e3);
+    const due = ago > VENT_MS;
+    note.textContent = due
+      ? `${mins}분째 — 창문 열 때가 됐어요`
+      : `${mins}분 전 환기함`;
+    note.className = `ventnote ${due ? "due" : ""}`;
+  }
+
+  const peers = $("peers");
+  peers.hidden = S.peers < 2;
+  $("peerCount").textContent = String(S.peers);
 }
 
 async function onHourStruck() {
@@ -724,6 +802,50 @@ function wire() {
     } catch { toast("저장하지 못했어요"); }
   });
 
+  // 쉬는 시간 — 아무나 시작하고 아무나 끝낼 수 있습니다.
+  // "언제 끝나는지"를 절대 시각으로 저장하니, 중간에 들어온 사람도 같은 숫자를 봅니다.
+  async function setBreak(mins) {
+    const now = Date.now();
+    const cur = breakState();
+    // 이미 돌고 있으면 연장, 아니면 지금부터 시작
+    const until = new Date((cur ? cur.until : now) + mins * 60e3).toISOString();
+    const total = Math.round(((cur ? cur.until - now : 0) + mins * 60e3) / 60e3);
+    try {
+      await db.saveConfig({ break_until: until, break_label: String(total) });
+      await refresh("meta");
+      toast(cur ? `쉬는 시간 ${mins}분 연장` : `쉬는 시간 ${mins}분 시작 ☕`);
+    } catch { toast("쉬는 시간을 시작하지 못했어요"); }
+  }
+  for (const id of ["breakSet", "breakOn"]) {
+    $(id).addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-break]");
+      if (btn) setBreak(Number(btn.dataset.break));
+    });
+  }
+  $("breakEnd").addEventListener("click", async () => {
+    try {
+      await db.saveConfig({ break_until: null, break_label: null });
+      await refresh("meta");
+    } catch { toast("끝내지 못했어요"); }
+  });
+
+  // 환기
+  $("ventBtn").addEventListener("click", async () => {
+    try {
+      await db.saveConfig({ vented_at: new Date().toISOString() });
+      await refresh("meta");
+      toast("환기 기록했어요 🪟");
+    } catch { toast("기록하지 못했어요"); }
+  });
+
+  // 게시판 갈래 필터
+  $("filters").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-filter]");
+    if (!btn) return;
+    S.filter = btn.dataset.filter;
+    renderBoard();
+  });
+
   // 게시판
   document.querySelector(".kindseg").addEventListener("click", (e) => {
     const btn = e.target.closest("button");
@@ -761,6 +883,7 @@ function wire() {
     if (!post) return;
     try {
       if (act === "like") await db.setLike(id, !post.liked_by_me);
+      else if (act === "ans") await db.toggleAnswered(id);
       else if (act === "pin") await db.togglePin(id);
       else if (act === "del") {
         if (!confirm("이 글을 지울까요?")) return;
@@ -885,6 +1008,10 @@ async function boot() {
   }
 
   setSave("아직 내 표 없음");
+  db.watchPeers((n) => {
+    S.peers = n;
+    renderClockBar(breakState());
+  });
   await refresh();
   db.subscribe((scope) => refresh(scope));
 

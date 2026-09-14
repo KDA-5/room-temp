@@ -1,7 +1,11 @@
 /**
- * 자유게시판 — 말풍선 목록.
+ * 자유게시판 + 익명 질문함 — 말풍선 목록.
  *
- * 링크를 붙여넣으면 바로 눌러서 들어갈 수 있게 자동으로 링크가 됩니다.
+ * 게시판과 질문함은 같은 테이블을 씁니다. kind 로만 갈라요.
+ *   💬 잡담 · 🙋 요청 · 🔗 정보 · ❓ 질문
+ * 질문만 "답변 완료" 도장을 찍을 수 있고, 안 찍힌 질문은 위로 올라옵니다.
+ *
+ * 링크를 붙여넣으면 바로 눌러 들어갈 수 있게 자동으로 링크가 됩니다.
  * 다만 글은 다른 사람이 쓴 "남의 입력"이라, HTML 로 먼저 이스케이프한 다음
  * http/https 로 시작하는 것만 <a> 로 바꿉니다. javascript: 같은 건 아예 안 걸려요.
  */
@@ -50,11 +54,6 @@ export function linkify(raw) {
   return out.join("");
 }
 
-export function hasLink(raw) {
-  URL_RE.lastIndex = 0;
-  return URL_RE.test(raw);
-}
-
 function timeAgo(iso) {
   const ms = Date.parse(iso);
   if (!Number.isFinite(ms)) return "";
@@ -65,27 +64,46 @@ function timeAgo(iso) {
   return `${Math.floor(s / 86400)}일 전`;
 }
 
-const KIND = {
-  chat: { tag: "", cls: "" },
-  req:  { tag: "🙋 요청", cls: "req" },
-  info: { tag: "🔗 정보", cls: "info" },
-};
+export const KINDS = [
+  { key: "all", label: "전체" },
+  { key: "q", label: "❓ 질문", tag: "❓ 질문", cls: "q" },
+  { key: "req", label: "🙋 요청", tag: "🙋 요청", cls: "req" },
+  { key: "info", label: "🔗 정보", tag: "🔗 정보", cls: "info" },
+  { key: "chat", label: "💬 잡담", tag: "", cls: "" },
+];
+const KIND = Object.fromEntries(KINDS.map((k) => [k.key, k]));
 
 export const MAX_PIN = 5;
 
+/** 아직 답변 안 된 질문 수 — 상단 배지에 씁니다. */
+export const openQuestions = (posts) => posts.filter((p) => p.kind === "q" && !p.answered).length;
+
 /**
- * 피드 HTML 을 만듭니다.
- * @param {object[]} posts posts_public 행들
- * @param {string}   uid   내 uid (내 글에만 삭제 버튼)
+ * 피드 HTML.
+ * @param {object[]} posts  posts_public 행들
+ * @param {string}   uid    내 uid (내 글에만 삭제 버튼)
+ * @param {string}   filter "all" | "q" | "req" | "info" | "chat"
  */
-export function feedHTML(posts, uid) {
-  if (!posts.length) {
-    return `<p class="empty">아직 글이 없어요. 첫 말풍선을 띄워보세요 💬<br>
-      <span class="dim">링크를 붙여넣으면 자동으로 눌러서 들어갈 수 있게 됩니다.</span></p>`;
+export function feedHTML(posts, uid, filter = "all") {
+  const list = filter === "all" ? posts : posts.filter((p) => p.kind === filter);
+
+  if (!list.length) {
+    const msg =
+      filter === "q"
+        ? "아직 질문이 없어요. 손 들기 어려운 질문일수록 여기가 편합니다 ❓"
+        : filter === "all"
+          ? "아직 글이 없어요. 첫 말풍선을 띄워보세요 💬"
+          : "이 갈래엔 아직 글이 없어요.";
+    return `<p class="empty">${msg}<br>
+      <span class="dim">링크를 붙여넣으면 자동으로 눌러 들어갈 수 있게 됩니다.</span></p>`;
   }
 
-  const sorted = posts.slice().sort((a, b) => {
+  // 고정 → 답변 안 된 질문 → 최신순
+  const sorted = list.slice().sort((a, b) => {
     if (!!b.pinned !== !!a.pinned) return b.pinned ? 1 : -1;
+    const aOpen = a.kind === "q" && !a.answered;
+    const bOpen = b.kind === "q" && !b.answered;
+    if (aOpen !== bOpen) return bOpen ? 1 : -1;
     return Date.parse(b.created_at) - Date.parse(a.created_at);
   });
 
@@ -95,18 +113,25 @@ export function feedHTML(posts, uid) {
       const mine = p.author === uid;
       const kind = KIND[p.kind] ?? KIND.chat;
       const likes = Number(p.likes) || 0;
+      const isQ = p.kind === "q";
 
       return (
         `<article class="post">` +
           `<div class="who">${creatureSVG(cfg, "happy")}<span>${esc(p.nick || "익명")}</span></div>` +
-          `<div class="bubble ${p.pinned ? "pin" : ""} ${kind.cls}">` +
+          `<div class="bubble ${p.pinned ? "pin" : ""} ${kind.cls} ${isQ && p.answered ? "done" : ""}">` +
             (kind.tag ? `<span class="tag">${kind.tag}</span> ` : "") +
             (p.pinned ? `<span class="tag pinned">📌 고정</span> ` : "") +
+            (isQ && p.answered ? `<span class="tag done">✅ 답변 완료</span> ` : "") +
             `<div class="txt">${linkify(p.body)}</div>` +
             `<div class="bmeta">` +
               `<span>${esc(timeAgo(p.created_at))}</span>` +
               `<button class="bact ${p.liked_by_me ? "on" : ""}" data-act="like" data-id="${esc(p.id)}" ` +
-                `aria-pressed="${!!p.liked_by_me}">${p.liked_by_me ? "💛" : "🤍"} 나도${likes ? ` ${likes}` : ""}</button>` +
+                `aria-pressed="${!!p.liked_by_me}">${p.liked_by_me ? "💛" : "🤍"} ` +
+                `${isQ ? "나도 궁금" : "나도"}${likes ? ` ${likes}` : ""}</button>` +
+              (isQ
+                ? `<button class="bact ${p.answered ? "on" : ""}" data-act="ans" data-id="${esc(p.id)}" ` +
+                  `aria-pressed="${!!p.answered}">✅ ${p.answered ? "답변 취소" : "답변 완료"}</button>`
+                : "") +
               `<button class="bact ${p.pinned ? "on" : ""}" data-act="pin" data-id="${esc(p.id)}" ` +
                 `aria-pressed="${!!p.pinned}">📌 ${p.pinned ? "고정 해제" : "고정"}</button>` +
               (mine ? `<button class="bact me" data-act="del" data-id="${esc(p.id)}">삭제</button>` : "") +

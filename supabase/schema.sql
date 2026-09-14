@@ -406,3 +406,75 @@ begin
   get diagnostics cnt = row_count;
   return cnt;
 end $$;
+
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  추가분 — 쉬는 시간 타이머 · 익명 질문함 · 환기 알림
+--  (이미 만든 DB 에 이 파일을 다시 돌려도 안전합니다)
+-- ═══════════════════════════════════════════════════════════════════════
+
+-- ── 쉬는 시간 · 환기 ────────────────────────────────────────────────────
+-- 쉬는 시간은 "언제 끝나는지"만 저장합니다. 남은 시간을 저장하면
+-- 나중에 들어온 사람이 처음부터 다시 세게 되거든요. 절대 시각이라야
+-- 누가 언제 접속하든 같은 숫자를 봅니다.
+alter table public.config add column if not exists break_until  timestamptz;
+alter table public.config add column if not exists break_label  text;
+alter table public.config add column if not exists vented_at    timestamptz;
+
+
+-- ── 익명 질문함 ─────────────────────────────────────────────────────────
+-- 게시판과 같은 테이블을 씁니다. kind='q' 가 질문이고,
+-- answered 로 "이건 답변했음"을 찍습니다.
+alter table public.posts add column if not exists answered    boolean not null default false;
+alter table public.posts add column if not exists answered_at timestamptz;
+
+alter table public.posts drop constraint if exists posts_kind_check;
+alter table public.posts add constraint posts_kind_check
+  check (kind in ('chat', 'req', 'info', 'q'));
+
+create index if not exists posts_open_q_idx
+  on public.posts (created_at desc) where kind = 'q' and not answered;
+
+-- 뷰에 answered 를 실어 보냅니다
+drop view if exists public.posts_public;
+create view public.posts_public
+with (security_invoker = off) as
+  select p.id, p.author, p.body, p.kind, p.nick,
+         p.cc, p.ce, p.ch, p.cp, p.ci,
+         p.pinned, p.pinned_at, p.answered, p.answered_at, p.created_at,
+         (select count(*) from public.post_likes l where l.post_id = p.id)   as likes,
+         exists (select 1 from public.post_likes l
+                  where l.post_id = p.id and l.uid = auth.uid())             as liked_by_me
+  from public.posts p;
+
+grant select on public.posts_public to anon, authenticated;
+
+-- 답변 완료 토글.
+-- 질문 글에만 걸리고, 누구나 찍을 수 있습니다 (강사만 찍게 하려면
+-- "누가 강사냐"를 정해야 하는데 그러면 익명 구조가 무너져요).
+create or replace function public.toggle_answered(p_id uuid)
+returns boolean
+language plpgsql security definer set search_path = public as $$
+declare cur boolean; k text;
+begin
+  if auth.uid() is null then
+    raise exception '로그인이 필요해요';
+  end if;
+
+  select answered, kind into cur, k from posts where id = p_id;
+  if cur is null then
+    raise exception '이미 지워진 글이에요';
+  end if;
+  if k <> 'q' then
+    raise exception '질문 글에만 쓸 수 있어요';
+  end if;
+
+  update posts
+     set answered    = not cur,
+         answered_at = case when not cur then now() else null end
+   where id = p_id;
+
+  return not cur;
+end $$;
+
+grant execute on function public.toggle_answered(uuid) to authenticated;

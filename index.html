@@ -43,13 +43,30 @@
       <span class="clockicon" id="clockIcon">⏳</span>
     </div>
     <div class="clocktext">
-      <div class="eyebrow">다음 조절 확인까지</div>
+      <div class="eyebrow" id="clockLabel">다음 조절 확인까지</div>
       <div class="clockbig"><span id="countdown">--:--</span></div>
       <p class="hint" id="clockNote">매 정각에 그 시점 표를 모아서 "바꿀지 말지"를 판단합니다. 매 분 들여다볼 순 없으니까요.</p>
     </div>
     <div class="clocknext">
-      <div class="eyebrow">다음 정각</div>
+      <div class="eyebrow" id="nextLabel">다음 정각</div>
       <div class="clocknexttime" id="nextHour">--시</div>
+    </div>
+
+    <div class="clockbar">
+      <div class="breakset" id="breakSet" role="group" aria-label="쉬는 시간 시작">
+        <span class="dim">☕ 쉬는 시간</span>
+        <button class="mini" type="button" data-break="5">5분</button>
+        <button class="mini" type="button" data-break="10">10분</button>
+        <button class="mini" type="button" data-break="15">15분</button>
+        <button class="mini" type="button" data-break="20">20분</button>
+      </div>
+      <div class="breakon" id="breakOn" hidden>
+        <button class="mini" type="button" data-break="5">＋5분</button>
+        <button class="mini" type="button" id="breakEnd">지금 끝내기</button>
+      </div>
+      <button class="mini vent" type="button" id="ventBtn">🪟 환기했어요</button>
+      <span class="ventnote" id="ventNote"></span>
+      <span class="peers" id="peers" hidden>👥 <b id="peerCount">–</b>명 보는 중</span>
     </div>
   </section>
 
@@ -250,10 +267,13 @@
   <section class="card">
     <div class="card-head">
       <div>
-        <h2>자유게시판</h2>
-        <p class="hint">잡담·요청·링크 아무거나. 링크는 자동으로 눌러서 들어갈 수 있게 됩니다. 📌 누르면 맨 위 고정.</p>
+        <h2>자유게시판 · 익명 질문함</h2>
+        <p class="hint">잡담·요청·링크 아무거나. ❓질문은 답변 완료를 찍을 수 있고, 안 찍힌 건 위로 올라옵니다.</p>
       </div>
-      <span class="chip" id="pinCount">고정 0 / 5</span>
+      <div class="headchips">
+        <span class="chip" id="openQ" hidden>❓ 답변 대기 0</span>
+        <span class="chip" id="pinCount">고정 0 / 5</span>
+      </div>
     </div>
 
     <div class="compose">
@@ -262,10 +282,11 @@
         <span id="composeNick">나</span>
       </div>
       <div>
-        <textarea id="postText" maxlength="300" placeholder="예) 창가쪽 너무 추워요 🥲&#10;예) 오늘 실습 자료 https://... 여기 있어요"></textarea>
+        <textarea id="postText" maxlength="300" placeholder="예) 창가쪽 너무 추워요 🥲&#10;예) 방금 join 설명 다시 한 번만…&#10;예) 오늘 실습 자료 https://... 여기 있어요"></textarea>
         <div class="composebar">
           <div class="kindseg" role="group" aria-label="글 종류">
             <button type="button" data-kind="chat" aria-pressed="true">💬 잡담</button>
+            <button type="button" data-kind="q" aria-pressed="false">❓ 질문</button>
             <button type="button" data-kind="req" aria-pressed="false">🙋 요청</button>
             <button type="button" data-kind="info" aria-pressed="false">🔗 정보</button>
           </div>
@@ -275,6 +296,7 @@
       </div>
     </div>
 
+    <div class="filters" id="filters" role="group" aria-label="글 갈래 고르기"></div>
     <div class="feed" id="feed"></div>
   </section>
 

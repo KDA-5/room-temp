@@ -114,6 +114,24 @@ export async function readMeta() {
   };
 }
 
+/** 설정 한 줄. 0.5KB 도 안 되는데 쉬는 시간·환기가 여기 있어서 자주 봐야 합니다. */
+export async function readConfig() {
+  if (!supabase) return {};
+  const config = await supabase.from("config").select("*").eq("id", 1).maybeSingle();
+  return { config: config.data ?? null };
+}
+
+/**
+ * 평상시 폴링용 — 투표 + 설정.
+ * 쉬는 시간 타이머가 설정에 들어 있어서, 브로드캐스트를 놓친 사람도
+ * 늦어도 3분 안엔 보게 됩니다. (meta 전체를 기다리면 30분이 걸려요.)
+ */
+export async function readLive() {
+  if (!supabase) return {};
+  const [v, c] = await Promise.all([readVotes(), readConfig()]);
+  return { ...v, ...c };
+}
+
 /** 첫 접속용 — 셋을 한 번에. */
 export async function readAll() {
   if (!supabase) return null;
@@ -175,6 +193,14 @@ export async function setLike(postId, on) {
   ping("posts");
 }
 
+/** 질문 글의 "답변 완료" 토글. 서버에서 kind='q' 인지 확인합니다. */
+export async function toggleAnswered(postId) {
+  if (!supabase) return;
+  const { error } = await supabase.rpc("toggle_answered", { p_id: postId });
+  if (error) throw new Error(error.message);
+  ping("posts");
+}
+
 export async function togglePin(postId) {
   if (!supabase) return;
   const { error } = await supabase.rpc("toggle_pin", { p_id: postId });
@@ -199,6 +225,13 @@ export async function recordCheckpoint() {
 
 let channel = null;
 let onChange = () => {};
+let onPeers = () => {};
+
+/** 지금 같은 페이지를 보고 있는 사람 수. 브로드캐스트 채널에 얹어 가는 거라
+ *  전송량은 사실상 안 씁니다. */
+export function watchPeers(handler) {
+  onPeers = handler;
+}
 
 /**
  * 뭔가 바꿨다고 다른 사람들에게 알립니다.
@@ -238,11 +271,18 @@ export function subscribe(handler) {
     }, COALESCE_MS);
   };
 
-  channel = supabase.channel("room", { config: { broadcast: { self: false } } });
+  channel = supabase.channel("room", {
+    config: { broadcast: { self: false }, presence: { key: uid || crypto.randomUUID() } },
+  });
   channel.on("broadcast", { event: "changed" }, (msg) => {
     coalesce(msg?.payload?.scope || "all");
   });
-  channel.subscribe();
+  channel.on("presence", { event: "sync" }, () => {
+    onPeers(Object.keys(channel.presenceState() || {}).length);
+  });
+  channel.subscribe((status) => {
+    if (status === "SUBSCRIBED") channel.track({ at: Date.now() }).catch(() => {});
+  });
 
   let lastFull = Date.now();
   const timer = setInterval(() => {
@@ -251,7 +291,7 @@ export function subscribe(handler) {
       lastFull = Date.now();
       onChange("all");
     } else {
-      onChange("votes");
+      onChange("live");
     }
   }, POLL_MS);
 
