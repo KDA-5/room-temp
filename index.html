@@ -3,72 +3,73 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
-<meta name="description" content="강의실 온도를 다같이 익명으로 정하는 한 화면짜리 보드. 캐릭터로 돌아다니고 채팅합니다.">
-<meta name="theme-color" content="#eceff5">
+<meta name="description" content="강의실 온도를 다같이 익명으로 정하는 한 화면짜리 보드.">
+<meta name="theme-color" content="#dce8f6">
 <title>강의실</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jua&family=Gowun+Dodum&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jua&family=Gowun+Dodum&family=IBM+Plex+Mono:wght@500;600&display=swap">
 </head>
 <body>
 
 <div class="app">
 
-  <!-- 온도바 — 이 앱의 본체 -->
-  <header class="topbar">
-    <div class="tbwrap">
-      <svg id="tempBar" viewBox="0 0 1000 120" role="group" aria-label="희망 온도 고르기"></svg>
+  <!-- ── 왼쪽: 세로 온도계 ─────────────────────────── -->
+  <aside class="thermo" id="thermo">
+    <div class="thlabel">내 희망 온도</div>
+    <div class="thwrap" id="thWrap">
+      <svg id="thermoSvg" viewBox="0 0 130 560" role="group" aria-label="희망 온도 고르기"></svg>
     </div>
-    <div class="tsum" id="tempSummary"></div>
-  </header>
+    <p class="thtip" id="thTip">👆 눈금을 눌러<br>고르세요</p>
+  </aside>
 
-  <!-- 세계 — 강의실과 마당 -->
+  <!-- ── 가운데: 세계 ──────────────────────────────── -->
   <main class="stage">
     <div class="roomwrap" id="roomWrap">
       <div class="people" id="people"></div>
-
       <div class="hud">
         <span class="pill room" id="roomName">📺 강의실</span>
         <span class="pill" id="clockPill">⏳ --:--</span>
         <span class="pill" id="peerPill" hidden>👥 <b>0</b></span>
       </div>
-
-      <p class="floortip" id="floorTip">바닥을 톡 누르면 그리로 걸어갑니다</p>
-      <button class="doorbtn" id="doorBtn" type="button">마당 →</button>
+      <p class="floortip" id="floorTip">바닥을 톡 누르면 그리로 걸어가요</p>
     </div>
   </main>
 
-  <!-- 아래 바 -->
+  <!-- ── 아래: 이모지 + 채팅 ───────────────────────── -->
   <footer class="dock">
+    <div class="rbar" id="reactBar" role="group" aria-label="리액션"></div>
     <form class="chatform" id="chatForm" autocomplete="off">
       <input id="chatInput" type="text" maxlength="60" placeholder="한마디 하기…" aria-label="채팅">
       <button class="send" type="submit" aria-label="보내기">↑</button>
     </form>
-    <div class="rbar" id="reactBar" role="group" aria-label="리액션"></div>
-    <nav class="tools" id="tools" aria-label="패널 열기">
-      <button type="button" data-panel="me"><em>🙂</em><span>나</span></button>
-      <button type="button" data-panel="wind"><em>🌬️</em><span>바람</span></button>
-      <button type="button" data-panel="stats"><em>📊</em><span>통계</span></button>
-      <button type="button" data-panel="board"><em>💬</em><span>게시판</span><i class="badge" id="qBadge" hidden></i></button>
-      <button type="button" data-panel="lecture"><em>🎓</em><span>강의</span></button>
-      <button type="button" data-panel="info"><em>🌤️</em><span>날씨</span></button>
-      <button type="button" data-panel="draw"><em>🎲</em><span>뽑기</span></button>
-      <button type="button" data-panel="more"><em>⚙️</em><span>설정</span></button>
-    </nav>
   </footer>
 
-  <!-- 위로 올라오는 패널 -->
-  <div class="scrim" id="scrim" hidden></div>
-  <section class="panel" id="panel" hidden aria-modal="true" role="dialog" aria-labelledby="panelTitle">
-    <div class="panelhead">
-      <h2 id="panelTitle">—</h2>
-      <button class="pclose" id="panelClose" type="button" aria-label="닫기">✕</button>
+  <!-- ── 오른쪽: 패널 + 아이콘 레일 ─────────────────── -->
+  <aside class="side" id="side">
+    <div class="sidepanel" id="sidePanel">
+      <div class="sidehead">
+        <h2 id="sideTitle">강의</h2>
+        <button class="sclose" id="sideClose" type="button" aria-label="닫기">✕</button>
+      </div>
+      <div class="sidebody" id="sideBody"></div>
     </div>
-    <div class="panelbody" id="panelBody"></div>
-  </section>
+    <nav class="rail" id="rail" aria-label="패널 고르기">
+      <button type="button" data-panel="lecture"><em>🎓</em><span>강의</span></button>
+      <button type="button" data-panel="wind"><em>🌬️</em><span>바람</span></button>
+      <button type="button" data-panel="chat"><em>🗨️</em><span>대화</span></button>
+      <button type="button" data-panel="board"><em>💬</em><span>게시판</span><i class="badge" id="qBadge" hidden></i></button>
+      <button type="button" data-panel="stats"><em>📊</em><span>통계</span></button>
+      <button type="button" data-panel="me"><em>🙂</em><span>나</span></button>
+      <button type="button" data-panel="draw"><em>🎲</em><span>뽑기</span></button>
+      <button type="button" data-panel="info"><em>🌤️</em><span>날씨</span></button>
+      <button type="button" data-panel="more"><em>⚙️</em><span>설정</span></button>
+    </nav>
+  </aside>
 
+  <div class="scrim" id="scrim" hidden></div>
   <div class="toast" id="toast" hidden></div>
   <div class="boot" id="boot"><span>강의실 여는 중…</span></div>
 </div>

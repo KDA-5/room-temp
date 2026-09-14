@@ -26,41 +26,35 @@ export function resolveSeason(key) {
   return SEASONS[k];
 }
 
-// ── 자리 구역 ────────────────────────────────────────────────────────────
-// 의견이 두 갈래로 갈리는 건 대부분 온도가 아니라 "어느 에어컨 바람을 맞느냐"입니다.
+// ── 자리 구역 · 바람 배분 ────────────────────────────────────────────────
 //
-// 이 강의실은 창문이 없고 에어컨이 셋입니다.
-//   · 천장(앞)  — 두 블록 사이 통로 앞쪽. 앞줄 양쪽에 다 걸립니다
-//   · 천장(뒤)  — 오른쪽 블록 뒤쪽 바로 위
-//   · 스탠드    — 왼쪽 블록 맨 뒤
-// 그래서 앞/뒤 × 왼쪽/오른쪽 네 칸이면 각 칸이 서로 다른 유닛에 대응합니다.
+// 이 앱의 진짜 결론은 "몇 도"가 아니라 "어느 쪽에 바람을 더/덜 보낼까"입니다.
 //
-// 자리표를 그대로 넣어 "내 자리 고르기"를 만들면 안 됩니다. 자리표엔 이름이
-// 적혀 있어서, 자리를 고르는 순간 이름을 대는 것과 같아지거든요. 구역 4칸이면
-// 한 칸에 8~10명이 들어가서 필요한 정보는 다 얻으면서 역추적은 막힙니다.
-export const ZONES = [
-  { i: 0, name: "앞 · 왼쪽",   ac: "🌬️", acName: "천장(앞) 통로 쪽" },
-  { i: 1, name: "앞 · 오른쪽", ac: "🌬️", acName: "천장(앞) 통로 · 앞문" },
-  { i: 2, name: "뒤 · 왼쪽",   ac: "🗄️", acName: "스탠드 에어컨 옆" },
-  { i: 3, name: "뒤 · 오른쪽", ac: "🌬️", acName: "천장(뒤) 바로 아래" },
-];
+// 36명의 희망 온도는 절대 하나로 안 모입니다. 누구는 덥고 누구는 춥고,
+// ASHRAE 기준으로도 최선이 80% 만족이에요. 그래서 온도는 하나로 정하고,
+// **남는 차이를 바람으로 메웁니다.**
+//
+//   구역 평균이 합의보다 높다  = 그 구역이 춥다  → 바람 줄이기 / 풍향 돌리기
+//   구역 평균이 합의보다 낮다  = 그 구역이 덥다  → 바람 더 보내기
+//
+// 온도를 1도 올리는 것보다 풍향을 한 번 돌리는 게 보통 더 효과가 큽니다.
+// 에어컨 바람이 직접 닿으면 실제 온도보다 2~3도 낮게 느껴지거든요.
 
-/**
- * 구역별 평균 희망 온도.
- * 4명 미만인 구역은 "누가 뭘 찍었는지" 역추적이 가능해지므로 감춥니다.
- */
-export const ZONE_MIN = 4;
+import { ZONES, ZONE_MIN } from "./world.js";
+export { ZONES, ZONE_MIN };
 
+export const WIND_MS = 3 * 3600e3;
+
+/** 구역별 평균 희망 온도와 바람 요청. 4명 미만은 역추적이 되므로 감춥니다. */
 export function zoneBreakdown(votes) {
+  const now = Date.now();
   const rows = ZONES.map((z) => {
     const inZone = votes.filter((v) => v.zone === z.i);
-    const xs = inZone.map((v) => v.t).filter(Number.isFinite);
+    const xs = inZone.map((v) => Number(v.t)).filter(Number.isFinite);
     const avg = xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null;
 
-    // 이 구역에서 최근 3시간 안에 들어온 바람 요청
-    const now = Date.now();
     const winds = inZone
-      .filter((v) => v.wind !== null && v.wind !== undefined && v.wind_at && now - Date.parse(v.wind_at) < 3 * 3600e3)
+      .filter((v) => v.wind !== null && v.wind !== undefined && v.wind_at && now - Date.parse(v.wind_at) < WIND_MS)
       .map((v) => Number(v.wind));
     const windAvg = winds.length ? winds.reduce((a, b) => a + b, 0) / winds.length : null;
 
@@ -74,18 +68,39 @@ export function zoneBreakdown(votes) {
     const lo = shown.reduce((a, b) => (b.avg < a.avg ? b : a));
     if (hi.avg - lo.avg >= 0.8) spread = { hi, lo, gap: hi.avg - lo.avg };
   }
-
-  // 바람을 가장 약하게 해달라는 구역 — 그 구역 유닛이 범인입니다
-  const blasted = rows
-    .filter((r) => r.windN >= 2 && r.windAvg <= -0.5)
-    .sort((a, b) => a.windAvg - b.windAvg)[0] || null;
-
-  return { rows, spread, blasted };
+  return { rows, spread };
 }
 
-// ── 바람 요청 ────────────────────────────────────────────────────────────
-export const WIND_MS = 3 * 3600e3;
+/**
+ * 구역별 바람 지시.
+ *   dir  -1 줄이기 · 0 그대로 · +1 더 보내기
+ *   src  무엇을 보고 정했는지 ("요청" 이면 직접 눌러준 것, "온도" 면 희망 온도 차이)
+ */
+export function airflow(zb, setpoint) {
+  const rows = zb.rows.map((z) => {
+    let dir = 0, src = null, gap = null;
 
+    if (z.shown && Number.isFinite(setpoint)) {
+      gap = z.avg - setpoint;                 // + 면 더 따뜻하길 원함 = 여기가 춥다
+      if (gap >= 0.6) { dir = -1; src = "온도"; }
+      else if (gap <= -0.6) { dir = 1; src = "온도"; }
+    }
+    // 직접 누른 바람 요청이 있으면 그게 우선입니다. 본인이 제일 잘 알아요.
+    if (z.windN >= 2) {
+      if (z.windAvg <= -0.5) { dir = -1; src = "요청"; }
+      else if (z.windAvg >= 0.5) { dir = 1; src = "요청"; }
+    }
+    return { ...z, dir, src, gap };
+  });
+
+  const less = rows.filter((r) => r.dir < 0);
+  const more = rows.filter((r) => r.dir > 0);
+
+  const byZone = new Map(rows.map((r) => [r.i, r]));
+  return { rows, byZone, less, more, balanced: !less.length && !more.length };
+}
+
+/** 전체 바람 요청 요약 — 최근 3시간. */
 export function windSummary(votes) {
   const now = Date.now();
   const vals = votes
@@ -98,6 +113,17 @@ export function windSummary(votes) {
     up: vals.filter((v) => v > 0).length,
     down: vals.filter((v) => v < 0).length,
   };
+}
+
+/** 화면에 그대로 쓸 한 줄 지시문. */
+export function airflowText(af, n) {
+  if (n < ZONE_MIN) return `자리를 고른 사람이 ${n}명이에요. ${ZONE_MIN}명 넘게 모인 구역부터 바람 배분이 나옵니다.`;
+  if (af.balanced) return "지금은 구역 간 차이가 크지 않아요. 바람을 따로 돌릴 필요 없습니다.";
+
+  const parts = [];
+  if (af.less.length) parts.push(`<b class="less">${af.less.map((r) => r.name).join(" · ")}</b> 쪽 바람을 <b>줄이거나 풍향을 돌려</b>주세요`);
+  if (af.more.length) parts.push(`<b class="more">${af.more.map((r) => r.name).join(" · ")}</b> 쪽으로 바람을 <b>더 보내</b>주세요`);
+  return parts.join("<br>") + "<br><span class=\"dim\">온도를 1도 바꾸는 것보다 풍향 한 번 돌리는 게 보통 더 셉니다.</span>";
 }
 
 // ── 날씨 · 습도 ──────────────────────────────────────────────────────────
