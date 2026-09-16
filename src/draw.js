@@ -1,7 +1,7 @@
 /**
  * 조 뽑기 · 발표 룰렛
  *
- * 뽑는 대상은 "최근 7일 안에 표를 낸 사람"입니다. 닉네임과 캐릭터만 쓰고
+ * 뽑는 대상은 "최근 7일 안에 표를 낸 사람"입니다. 닉네임만 쓰고
  * 실명은 어디에도 안 나와요.
  *
  * 결과는 반드시 서버에 저장해서 모두가 같은 화면을 봐야 합니다.
@@ -61,9 +61,5 @@ export function pickOne(members, history = []) {
 export function toMembers(votes) {
   return votes
     .filter((v) => Number.isFinite(Number(v.t)))
-    .map((v, i) => ({
-      key: `${v.nick || "익명"}#${v.cc}${v.ce}${v.ch}${v.cp}${v.ci}#${i}`,
-      nick: v.nick || "익명",
-      cfg: { cc: v.cc, ce: v.ce, ch: v.ch, cp: v.cp, ci: v.ci },
-    }));
+    .map((v, i) => ({ key: `${v.nick || "익명"}#${i}`, nick: v.nick || "익명" }));
 }

@@ -10,7 +10,7 @@
  * http/https 로 시작하는 것만 <a> 로 바꿉니다. javascript: 같은 건 아예 안 걸려요.
  */
 
-import { creatureSVG } from "./creature.js";
+import { nickColor, nickInitial } from "./zones.js";
 
 const esc = (s) =>
   String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -109,7 +109,6 @@ export function feedHTML(posts, uid, filter = "all") {
 
   return sorted
     .map((p) => {
-      const cfg = { cc: p.cc, ce: p.ce, ch: p.ch, cp: p.cp, ci: p.ci };
       const mine = p.author === uid;
       const kind = KIND[p.kind] ?? KIND.chat;
       const likes = Number(p.likes) || 0;
@@ -117,7 +116,8 @@ export function feedHTML(posts, uid, filter = "all") {
 
       return (
         `<article class="post">` +
-          `<div class="who">${creatureSVG(cfg, "happy")}<span>${esc(p.nick || "익명")}</span></div>` +
+          `<div class="who"><i class="dot" style="background:${nickColor(p.nick)}">${esc(nickInitial(p.nick))}</i>` +
+          `<span>${esc(p.nick || "익명")}</span></div>` +
           `<div class="bubble ${p.pinned ? "pin" : ""} ${kind.cls} ${isQ && p.answered ? "done" : ""}">` +
             (kind.tag ? `<span class="tag">${kind.tag}</span> ` : "") +
             (p.pinned ? `<span class="tag pinned">📌 고정</span> ` : "") +

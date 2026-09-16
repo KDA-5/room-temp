@@ -1,20 +1,15 @@
 /**
  * 그림 그리는 곳 — 전부 손으로 만든 SVG 문자열입니다. 차트 라이브러리 없음.
  *
- * 메인 차트의 아이디어: 점 대신 사람(캐릭터)을 세웁니다.
- * 36명이 온도 축 위에 줄줄이 서 있고, 합의 타점에서 멀리 있는 캐릭터일수록
- * 표정이 힘들어져요. "불만족 6명"이라는 숫자보다 훨씬 빨리 읽힙니다.
- * 뒤에 깔린 부드러운 능선은 그 캐릭터들의 분포를 매끄럽게 편 것이고요.
+ * 분포 차트는 점 하나가 한 사람입니다. 합의 타점에서 멀어질수록
+ * 점 색이 파랑(더 따뜻하길 원함) 또는 빨강(더 시원하길 원함)으로 갑니다.
+ * 뒤에 깔린 능선은 그 점들의 분포를 매끄럽게 편 것이고요.
  */
 
-import { creature, moodOf } from "./creature.js";
 import { bandwidth, kde, clamp, toHalf, r1, fmt } from "./stats.js";
 
 const esc = (s) =>
   String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-
-const reduceMotion = () =>
-  window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 // 차트 좌표계 (viewBox 760 × 392)
 export const P = { w: 760, h: 392, x0: 58, x1: 702, base: 298, top: 56, tickY: 320, capY: 344 };
@@ -54,10 +49,8 @@ export function drawRidge(svg, c, band) {
     buckets.set(k, (buckets.get(k) ?? 0) + 1);
   }
   const maxCount = Math.max(0, ...buckets.values());
-  const CW = 30;
-  const CH = 33;
-  const gap = maxCount > 1 ? Math.min(CH - 5, 196 / (maxCount - 1)) : CH;
-  const stackTop = P.base - 4 - Math.max(0, maxCount - 1) * gap - CH;
+  const gap = maxCount > 1 ? Math.min(15, 210 / (maxCount - 1)) : 15;
+  const stackTop = P.base - 12 - Math.max(0, maxCount - 1) * gap - 8;
 
   // 부드러운 능선 — 캐릭터 더미의 겉선이 되도록 높이를 맞춥니다
   if (c.n >= 3) {
@@ -95,37 +88,25 @@ export function drawRidge(svg, c, band) {
     `fill="var(--ink-2)" font-family="var(--sans)" font-size="11.5">${esc(band.name)} 권장 ${band.lo}–${band.hi}°C</text>`
   );
 
-  // 캐릭터들 — 내 것을 맨 마지막에 그려서 위로 올립니다
+  // 점 하나가 한 사람. 합의에서 멀수록 색이 진해집니다.
   const placed = new Map();
-  const still = reduceMotion();
   const ordered = c.votes.slice().sort((a, b) => (a.is_me ? 1 : 0) - (b.is_me ? 1 : 0));
 
-  ordered.forEach((v, idx) => {
+  ordered.forEach((v) => {
     if (!Number.isFinite(v.t)) return;
     const k = toHalf(v.t).toFixed(1);
     const stack = placed.get(k) ?? 0;
     placed.set(k, stack + 1);
 
     const cx = sx(parseFloat(k));
-    const cy = P.base - 4 - stack * gap - CH;
-    const mood = moodOf(v.t, c.setpoint);
-    const sc = (CW / 44).toFixed(4);
+    const cy = P.base - 12 - stack * gap;
+    const d = v.t - c.setpoint;
+    const far = Math.abs(d) > 1.5;
+    const fill = Math.abs(d) <= 0.5 ? "var(--ink-3)" : d > 0 ? "var(--cold)" : "var(--hot)";
 
-    // 바깥 <g> 는 transform 속성으로 위치를, 안쪽 <g> 는 CSS 로 움직임을 담당합니다.
-    // (CSS transform 은 transform 속성을 덮어쓰기 때문에 반드시 나눠야 해요.)
-    const anim = still ? "" : ` class="bob" style="animation-delay:${((idx % 9) * 0.31).toFixed(2)}s"`;
-    out.push(
-      `<g transform="translate(${(cx - CW / 2).toFixed(1)},${cy.toFixed(1)}) scale(${sc})">` +
-        `<g${anim}>${creature(v, mood)}</g></g>`
-    );
-
-    const label = v.is_me ? "나" : v.show_nick && v.nick ? v.nick : "";
-    if (label) {
-      out.push(
-        `<text x="${cx.toFixed(1)}" y="${(cy - 3).toFixed(1)}" text-anchor="middle" ` +
-        `fill="${v.is_me ? "var(--accent)" : "var(--ink-3)"}" font-family="var(--display)" font-size="10.5">${esc(label.slice(0, 7))}</text>`
-      );
-    }
+    out.push(`<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${(far ? 7 : 6).toFixed(1)}" fill="var(--card)"/>`);
+    out.push(`<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${(far ? 5.5 : 4.5).toFixed(1)}" fill="${fill}"` +
+             (v.is_me ? ` stroke="var(--accent)" stroke-width="2.5"` : "") + `/>`);
   });
 
   // 합의 타점

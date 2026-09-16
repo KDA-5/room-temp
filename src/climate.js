@@ -40,7 +40,7 @@ export function resolveSeason(key) {
 // 온도를 1도 올리는 것보다 풍향을 한 번 돌리는 게 보통 더 효과가 큽니다.
 // 에어컨 바람이 직접 닿으면 실제 온도보다 2~3도 낮게 느껴지거든요.
 
-import { ZONES, ZONE_MIN } from "./world.js";
+import { ZONES, ZONE_MIN } from "./zones.js";
 export { ZONES, ZONE_MIN };
 
 export const WIND_MS = 3 * 3600e3;
