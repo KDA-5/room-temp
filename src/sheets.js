@@ -12,17 +12,26 @@ import {
   humidityAdvice, SEASONS,
 } from "./climate.js";
 import { feedHTML, openQuestions, KINDS, MAX_PIN } from "./board.js";
+import {
+  wheelItems, slotColor, MAX_SLOTS, MIN_SLOTS,
+  POLL_PRESETS, MAX_CHOICES, pollTally,
+  LADDER_MIN, LADDER_MAX, walkLadder,
+  questionOfDay, todaysAnswers, answerText,
+} from "./fun.js";
 
 const esc = (s) =>
   String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 export const SHEETS = [
-  { key: "board",  icon: "💬", label: "게시판 · 질문함", desc: "잡담 · 요청 · 링크 · 익명 질문" },
-  { key: "stats",  icon: "📊", label: "통계",           desc: "분포 · 정각 기록 · 14일 추이" },
-  { key: "draw",   icon: "🎲", label: "조 뽑기 · 순서",  desc: "랜덤 조 편성 · 발표 순서" },
-  { key: "info",   icon: "🌤️", label: "바깥 · 잡학",    desc: "기온 · 습도 · 불쾌지수" },
-  { key: "qr",     icon: "📱", label: "QR 코드",        desc: "폰으로 바로 들어오기" },
-  { key: "config", icon: "⚙️", label: "설정",           desc: "에어컨 · 쉬는 시간 · 계절 · 테마" },
+  { key: "board",    icon: "💬", label: "게시판 · 질문함", desc: "잡담 · 요청 · 링크 · 익명 질문" },
+  { key: "dailyq",   icon: "🌟", label: "오늘의 질문",     desc: "매일 하나씩 · 익명 한 줄" },
+  { key: "poll",     icon: "🗳️", label: "즉석 투표",      desc: "아무 질문이나 · 1인 1표 익명" },
+  { key: "roulette", icon: "🎡", label: "점심 룰렛",       desc: "오늘 뭐 먹지 · 다같이 한 판" },
+  { key: "ladder",   icon: "🪜", label: "사다리 타기",     desc: "커피 내기 · 당번 정하기" },
+  { key: "stats",    icon: "📊", label: "통계",           desc: "분포 · 정각 기록 · 14일 추이" },
+  { key: "info",     icon: "🌤️", label: "바깥 · 잡학",    desc: "기온 · 습도 · 불쾌지수" },
+  { key: "qr",       icon: "📱", label: "QR 코드",        desc: "폰으로 바로 들어오기" },
+  { key: "config",   icon: "⚙️", label: "설정",           desc: "에어컨 · 쉬는 시간 · 계절 · 테마" },
 ];
 
 export const TITLES = Object.fromEntries(SHEETS.map((s) => [s.key, `${s.icon} ${s.label}`]));
@@ -122,33 +131,181 @@ function ago(ms) {
   return `${Math.floor(s / 3600)}시간 전`;
 }
 
-/* ── 뽑기 ───────────────────────────────────────────────────────── */
-export function drawSheet(S, members) {
-  const g = S.config?.draw_groups;
-  const groups = g?.groups?.length
-    ? `<div class="groups">` + g.groups.map((grp, i) =>
-        `<div class="group" style="animation-delay:${(i * .07).toFixed(2)}s"><h4>${i + 1}조 · ${grp.length}명</h4>` +
-        grp.map((m) => `<div>${esc(m.nick)}</div>`).join("") + `</div>`).join("") + `</div>`
-    : `<p class="empty">위에서 조 개수를 누르면 결과가 나옵니다.</p>`;
+/* ── 🎡 점심 룰렛 ───────────────────────────────────────────────── */
+/**
+ * 원판은 CSS transform 으로만 돌립니다. 결과는 미리 정해서 서버에 적고,
+ * 그 각도로 돌리는 거라 36명이 같은 걸 봅니다.
+ */
+export function rouletteSheet(S) {
+  const items = wheelItems(S.config);
+  const r = S.config?.roulette;
+  const n = items.length;
+  const slice = 360 / n;
 
-  const pk = S.config?.draw_pick;
-  const pick = pk?.current
-    ? `<div class="pickbox" id="pickBox"><div class="pickname">${esc(pk.current.nick)}</div></div>`
-    : `<p class="empty">🎯 뽑기를 누르면 한 명이 나옵니다.</p>`;
-  const done = members.filter((m) => (pk?.history ?? []).includes(m.key));
+  // 파이 조각 하나 그리기 (반지름 100, 중심 0,0)
+  const arc = (i) => {
+    const a0 = (i * slice - 90) * (Math.PI / 180);
+    const a1 = ((i + 1) * slice - 90) * (Math.PI / 180);
+    const big = slice > 180 ? 1 : 0;
+    return `M 0 0 L ${(100 * Math.cos(a0)).toFixed(2)} ${(100 * Math.sin(a0)).toFixed(2)} ` +
+           `A 100 100 0 ${big} 1 ${(100 * Math.cos(a1)).toFixed(2)} ${(100 * Math.sin(a1)).toFixed(2)} Z`;
+  };
+  const label = (i) => {
+    const a = ((i + 0.5) * slice - 90) * (Math.PI / 180);
+    const x = 66 * Math.cos(a), y = 66 * Math.sin(a);
+    // 글씨를 반지름 방향으로 누입니다. 그대로 두면 왼쪽 칸이 뒤집힐서,
+    // 6시~12시 구간은 180도 더 돌려 바로 읽히게 합니다.
+    const deg = (i + 0.5) * slice;
+    const rot = deg > 180 ? deg + 90 : deg - 90;
+    return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" class="wl" text-anchor="middle" ` +
+           `dominant-baseline="central" transform="rotate(${rot.toFixed(1)} ${x.toFixed(1)} ${y.toFixed(1)})">` +
+           `${esc(items[i])}</text>`;
+  };
+
+  const wheel =
+    `<div class="wheelbox"><div class="needle">▼</div>` +
+    `<svg id="wheel" viewBox="-110 -110 220 220" role="img" aria-label="점심 룰렛">` +
+    `<g id="wheelSpin">` +
+    items.map((_, i) => `<path d="${arc(i)}" fill="${slotColor(i)}" stroke="var(--card)" stroke-width="1"/>`).join("") +
+    items.map((_, i) => label(i)).join("") +
+    `<circle r="17" fill="var(--card)" stroke="var(--line)" stroke-width="2"/></g></svg></div>`;
+
+  const result = r?.pick != null && items[r.pick]
+    ? `<p class="winner" id="wheelWin"><span class="wtag">오늘의 메뉴</span><b>${esc(items[r.pick])}</b></p>`
+    : `<p class="empty">돌리면 하나가 정해집니다.</p>`;
 
   return (
-    `<p class="hint">최근 7일 안에 표를 낸 <b>${members.length}명</b> 중에서 뽑습니다. 닉네임만 나와요.</p>` +
-    `<div class="card"><h3>조 뽑기</h3><div class="row mt">` +
-    [3, 4, 5, 6].map((n) => `<button class="mini" type="button" data-groups="${n}">${n}조</button>`).join("") +
-    `<button class="mini" id="groupsClear" type="button">지우기</button></div>${groups}</div>` +
-    `<div class="card"><h3>발표 순서</h3><p class="hint">뽑힌 사람은 빼고 고릅니다. 한 바퀴 돌면 초기화돼요.</p>` +
-    `<div class="row mt"><button class="btn accent" id="pickBtn" type="button">🎯 뽑기</button>` +
-    `<button class="mini" id="pickReset" type="button">기록 지우기</button>` +
-    `<span class="dim" style="font-size:12px">${done.length}/${members.length}</span></div>${pick}` +
-    `<div class="picklist">${done.map((m) => `<span>${esc(m.nick)}</span>`).join("")}</div></div>`
+    `<div class="card"><p class="hint">한 명이 돌리면 <b>모두에게 같은 결과</b>가 뜹니다. 따로 돌려서 우기기 없기.</p>` +
+    wheel +
+    `<div class="row mt" style="justify-content:center">` +
+    `<button class="btn accent" id="spinBtn" type="button">🎡 돌리기</button>` +
+    `<button class="mini" id="editSlots" type="button">메뉴 고치기</button></div>` +
+    result + `</div>` +
+    (S.editSlots
+      ? `<div class="card"><h3>메뉴 목록</h3><p class="hint">한 줄에 하나씩. ${MIN_SLOTS}~${MAX_SLOTS}개까지요.</p>` +
+        `<textarea id="slotText" class="slots">${esc(items.join("\n"))}</textarea>` +
+        `<div class="row mt"><button class="btn accent" id="saveSlots" type="button">저장</button>` +
+        `<button class="mini" id="resetSlots" type="button">기본값으로</button></div></div>`
+      : "")
   );
 }
+
+/* ── 🗳️ 즉석 익명 투표 ─────────────────────────────────────────── */
+export function pollSheet(S) {
+  const poll = S.config?.poll;
+
+  if (!poll?.id || S.newPoll) {
+    const presets = POLL_PRESETS.map((p, i) =>
+      `<button class="mini" type="button" data-preset="${i}">${esc(p.q)}</button>`).join("");
+    return (
+      `<div class="card"><h3>새 투표 만들기</h3>` +
+      `<p class="hint">누가 뭘 찍었는지는 <b>아무도 못 봅니다.</b> 온도 투표와 같은 구조예요. 한 사람 한 표.</p>` +
+      `<input id="pollQ" class="ti" maxlength="60" placeholder="질문 — 예) 에어컨 더 낮출까요?">` +
+      `<textarea id="pollOpts" class="slots" placeholder="선택지를 한 줄에 하나씩&#10;네&#10;아니요&#10;상관없음"></textarea>` +
+      `<p class="hint">최대 ${MAX_CHOICES}개까지.</p>` +
+      `<div class="row mt"><button class="btn accent" id="makePoll" type="button">투표 열기</button>` +
+      (poll?.id ? `<button class="mini" id="cancelPoll" type="button">취소</button>` : "") + `</div></div>` +
+      `<div class="card"><h3>이런 것도</h3><div class="row mt">${presets}</div></div>`
+    );
+  }
+
+  const t = pollTally(poll, S.votes);
+  const rows = poll.opts.map((o, i) => {
+    const on = t.mine === i;
+    return `<button type="button" class="pollrow${on ? " on" : ""}${t.lead[i] ? " lead" : ""}" data-pick="${i}" aria-pressed="${on}">` +
+      `<span class="pb" style="width:${t.pct[i].toFixed(1)}%"></span>` +
+      `<span class="pt">${esc(o)}</span>` +
+      `<span class="pn">${t.counts[i]}<i>${Math.round(t.pct[i])}%</i></span></button>`;
+  }).join("");
+
+  return (
+    `<div class="card"><h3>${esc(poll.q)}</h3>` +
+    `<p class="hint">${t.total}명 참여${t.mine === null ? " · 아직 안 찍으셨어요" : " · 다시 누르면 바꿀 수 있어요"}</p>` +
+    `<div class="pollbox">${rows}</div></div>` +
+    `<div class="card"><div class="row"><button class="mini" id="newPoll" type="button">새 투표 만들기</button>` +
+    `<button class="mini" id="closePoll" type="button">이 투표 닫기</button></div>` +
+    `<p class="hint">닫으면 결과는 사라집니다. 기록이 필요하면 게시판에 옮겨두세요.</p></div>`
+  );
+}
+
+/* ── 🪜 사다리 타기 ─────────────────────────────────────────────── */
+export function ladderSheet(S) {
+  const L = S.config?.ladder;
+  if (!L?.ladder) {
+    return (
+      `<div class="card"><h3>사다리 타기</h3>` +
+      `<p class="hint">커피 내기, 청소 당번, 발표 순서… 몇 명인지 정하고 위/아래에 뭘 적을지 채우면 됩니다.</p>` +
+      `<label class="fl">참가자 (한 줄에 하나씩)</label>` +
+      `<textarea id="ladTop" class="slots" placeholder="민수&#10;지현&#10;태정&#10;보경"></textarea>` +
+      `<label class="fl">결과 (같은 개수로)</label>` +
+      `<textarea id="ladBot" class="slots" placeholder="커피&#10;꽝&#10;꽝&#10;꽝"></textarea>` +
+      `<p class="hint">${LADDER_MIN}~${LADDER_MAX}명까지요.</p>` +
+      `<div class="row mt"><button class="btn accent" id="makeLadder" type="button">🪜 사다리 만들기</button></div></div>`
+    );
+  }
+
+  const { ladder, top, bot } = L;
+  const W = 40, H = 26, PAD = 14;
+  const x = (c) => PAD + c * W;
+  const y = (r) => 30 + r * H;
+  const h = y(ladder.rows) + 34;
+
+  const lines = [];
+  for (let c = 0; c < ladder.cols; c++)
+    lines.push(`<line x1="${x(c)}" y1="30" x2="${x(c)}" y2="${y(ladder.rows)}" class="lrail"/>`);
+  for (const b of ladder.bars)
+    lines.push(`<line x1="${x(b.x)}" y1="${y(b.y + 1)}" x2="${x(b.x + 1)}" y2="${y(b.y + 1)}" class="lbar"/>`);
+
+  const heads = top.map((t, c) =>
+    `<text x="${x(c)}" y="18" class="lcap" text-anchor="middle">${esc(t)}</text>`).join("");
+  const feet = bot.map((t, c) =>
+    `<text x="${x(c)}" y="${h - 10}" class="lcap foot" text-anchor="middle">${esc(t)}</text>`).join("");
+
+  const picked = L.picked ?? {};
+  const buttons = top.map((t, c) => {
+    const got = picked[c];
+    return `<button class="mini${got != null ? " done" : ""}" type="button" data-climb="${c}">` +
+      `${esc(t)}${got != null ? ` → ${esc(bot[got])}` : ""}</button>`;
+  }).join("");
+
+  const width = PAD * 2 + (ladder.cols - 1) * W;
+  return (
+    `<div class="card"><h3>누구부터 탈까요</h3>` +
+    `<p class="hint">이름을 누르면 줄을 타고 내려갑니다. 결과는 모두에게 똑같이 남아요.</p>` +
+    `<div class="row mt">${buttons}</div>` +
+    `<div class="ladderbox"><svg id="ladder" viewBox="0 0 ${width} ${h}" role="img" aria-label="사다리">` +
+    lines.join("") + heads + feet +
+    `<path id="ladPath" class="ltrace" fill="none"/></svg></div>` +
+    `<div class="row mt"><button class="mini" id="resetLadder" type="button">새로 만들기</button></div></div>`
+  );
+}
+
+/* ── 🌟 오늘의 질문 ─────────────────────────────────────────────── */
+export function dailyqSheet(S) {
+  const { i, q } = questionOfDay();
+  const answers = todaysAnswers(S.posts, i);
+  const mine = answers.find((a) => a.is_mine);
+
+  const list = !answers.length
+    ? `<p class="empty">아직 아무도 답하지 않았어요.<br><span class="dim">첫 줄을 남겨보세요.</span></p>`
+    : `<div class="feed">` + answers.map((a) =>
+        `<div class="post"><div class="who"><i class="dot" style="background:${nickColor(a.nick)}">${esc(nickInitial(a.nick))}</i></div>` +
+        `<div class="bubble"><div class="txt">${esc(answerText(a.body))}</div>` +
+        `<div class="bmeta"><span>${esc(a.nick || "익명")}</span>` +
+        (a.is_mine ? `<button class="bact me" data-act="del" data-id="${a.id}">지우기</button>` : "") +
+        `</div></div></div>`).join("") + `</div>`;
+
+  return (
+    `<div class="card q-of-day"><span class="qtag">🌟 오늘의 질문</span><h3>${esc(q)}</h3>` +
+    `<p class="hint">매일 자정에 새 질문으로 바뀝니다. 닉네임만 보여요.</p></div>` +
+    (mine
+      ? `<div class="card"><p class="hint">이미 답하셨어요. 지우고 다시 쓸 수 있습니다.</p></div>`
+      : `<div class="card compose"><textarea id="qaText" maxlength="120" placeholder="한 줄로 답해주세요…"></textarea>` +
+        `<div class="row mt"><button class="btn accent" id="qaSend" type="button" style="margin-left:auto">남기기</button></div></div>`) +
+    `<p class="hint" style="padding:0 2px">${answers.length}명이 답했어요</p>` + list
+  );
+}
+
 
 /* ── 날씨 · 잡학 ────────────────────────────────────────────────── */
 export function infoSheet(S, b, trivia) {

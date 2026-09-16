@@ -25,12 +25,17 @@ import { ZONES, SEAT_ROWS, ZONE_MIN } from "./zones.js";
 import {
   resolveSeason, zoneBreakdown, airflow, airflowText,
   fetchWeather, weatherLabel, discomfortIndex, discomfortLabel,
-  triviaIndexOfToday, TRIVIA, countdownText,
+  triviaIndexOfNow, TRIVIA, countdownText,
 } from "./climate.js";
 import { scheduleNow } from "./schedule.js";
 import { drawRidge, drawSpark, drawHourly, P } from "./chart.js";
 import { openQuestions } from "./board.js";
-import { makeGroups, pickOne, toMembers } from "./draw.js";
+import {
+  wheelItems, LUNCH_DEFAULT, MIN_SLOTS, MAX_SLOTS, spinAngle,
+  POLL_PRESETS, MAX_CHOICES, makePoll,
+  makeLadder, walkLadder, LADDER_MIN, LADDER_MAX,
+  questionOfDay, answerBody,
+} from "./fun.js";
 import * as sh from "./sheets.js";
 
 const $ = (id) => document.getElementById(id);
@@ -65,6 +70,7 @@ const S = {
   peers: 0, chatlog: [], seenMsg: new Map(),
   tab: "temp", sheet: null, filter: "all", kind: "chat",
   triviaIdx: null, barOpen: false, lastHour: null, breakSeen: null,
+  editSlots: false, newPoll: false, spinning: false,
   sched: null, phaseSeen: null, chatSeen: 0, left: false,
   matchSeen: null, nowSeen: null,
 };
@@ -164,7 +170,13 @@ async function refresh(scope = "all") {
       : scope === "meta" ? await db.readMeta()
       : await db.readAll();
     if (data) {
+      const before = S.config?.roulette?.at;
       Object.assign(S, data);
+      // 남이 돌린 룰렛도 내 화면에서 같이 돌아갑니다
+      const after = S.config?.roulette?.at;
+      if (after && after !== before && S.sheet === "roulette" && !S.spinning) {
+        setTimeout(() => turnWheel(S.config.roulette.pick, wheelItems(S.config).length), 40);
+      }
       if (S.mine?.nick) { S.me.nick = S.mine.nick; saveMe(); }
     }
   } catch (err) {
@@ -260,8 +272,8 @@ function renderOutside() {
  * 눌러서 다음 걸로 넘길 수 있고, 바깥·잡학 시트와 같은 번호를 씁니다.
  */
 function trivia() {
-  if (S.triviaIdx === null) S.triviaIdx = triviaIndexOfToday();
-  return TRIVIA[S.triviaIdx % TRIVIA.length];
+  // null 이면 시계를 따라갑니다. '다음' 을 누른 동안만 손으로 고정돼요.
+  return TRIVIA[(S.triviaIdx ?? triviaIndexOfNow()) % TRIVIA.length];
 }
 
 function renderNow(animate = false) {
@@ -271,7 +283,7 @@ function renderNow(animate = false) {
 }
 
 function nextTrivia() {
-  S.triviaIdx = ((S.triviaIdx ?? triviaIndexOfToday()) + 1) % TRIVIA.length;
+  S.triviaIdx = ((S.triviaIdx ?? triviaIndexOfNow()) + 1) % TRIVIA.length;
   renderNow(true);
   if (S.sheet === "info") renderSheet("info", summarise(S.votes, band()), band());
 }
@@ -647,7 +659,10 @@ function closeSheet() {
 function renderSheet(key, c, b) {
   const body = $("sheetBody");
   if (key === "board") body.innerHTML = sh.boardSheet(S);
-  else if (key === "draw") body.innerHTML = sh.drawSheet(S, toMembers(S.votes));
+  else if (key === "roulette") { body.innerHTML = sh.rouletteSheet(S); restWheel(); }
+  else if (key === "poll") body.innerHTML = sh.pollSheet(S);
+  else if (key === "ladder") body.innerHTML = sh.ladderSheet(S);
+  else if (key === "dailyq") body.innerHTML = sh.dailyqSheet(S);
   else if (key === "info") body.innerHTML = sh.infoSheet(S, b, trivia());
   else if (key === "config") body.innerHTML = sh.configSheet(S, c, b, lsGet("roomtemp.theme") || "system");
   else if (key === "qr") { body.innerHTML = sh.qrSheet(); makeQR(); }
@@ -741,6 +756,8 @@ function tickClock() {
 }
 
 async function onHourStruck() {
+  S.triviaIdx = null;   // 손으로 넘겨봤더라도 정각엔 다시 시계를 따릅니다
+  renderNow(true);
   renderLecture();
   if (!db.configured) return;
   try {
@@ -864,35 +881,76 @@ async function onSheetClick(e) {
 
   if (hit("#triviaNext")) return nextTrivia();
 
-  // 뽑기
-  const g = hit("[data-groups]");
-  if (g) {
-    const m = toMembers(S.votes);
-    if (m.length < 2) return toast("표를 낸 사람이 너무 적어요");
-    const n = Number(g.dataset.groups);
-    return saveConfig({ draw_groups: { n, at: new Date().toISOString(), groups: makeGroups(m, n) } });
+  // 🎡 점심 룰렛
+  if (hit("#editSlots")) { S.editSlots = !S.editSlots; return again("roulette"); }
+  if (hit("#resetSlots")) { S.editSlots = false; return saveConfig({ roulette: { items: LUNCH_DEFAULT, pick: null } }); }
+  if (hit("#saveSlots")) {
+    const items = lines($("slotText")?.value, MAX_SLOTS);
+    if (items.length < MIN_SLOTS) return toast(`${MIN_SLOTS}개는 있어야 해요`);
+    S.editSlots = false;
+    return saveConfig({ roulette: { items, pick: null } });
   }
-  if (hit("#groupsClear")) return saveConfig({ draw_groups: null });
-  if (hit("#pickBtn")) {
-    const m = toMembers(S.votes);
-    if (!m.length) return toast("아직 표를 낸 사람이 없어요");
-    const res = pickOne(m, S.config?.draw_pick?.history ?? []);
-    if (!res) return;
-    // 후보를 점점 느리게 스쳐 지나간 뒤 멈춥니다. 바로 결과만 뜨면 재미가 없어요.
-    const box = $("pickBox");
-    if (box && !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
-      box.classList.add("rolling");
-      const name = box.querySelector(".pickname");
-      for (let i = 0, wait = 50; i < 16; i++, wait *= 1.17) {
-        if (name) name.textContent = m[(Math.random() * m.length) | 0].nick;
-        await new Promise((k) => setTimeout(k, wait));
-      }
-      box.classList.remove("rolling");
-    }
-    if (res.wrapped) toast("한 바퀴 다 돌아 새로 시작합니다");
-    return saveConfig({ draw_pick: { at: new Date().toISOString(), current: res.picked, history: res.history } });
+  if (hit("#spinBtn")) return spinWheel();
+
+  // 🗳️ 즉석 투표
+  const preset = hit("[data-preset]");
+  if (preset) {
+    const pr = POLL_PRESETS[Number(preset.dataset.preset)];
+    if ($("pollQ")) $("pollQ").value = pr.q;
+    if ($("pollOpts")) $("pollOpts").value = pr.opts.join("\n");
+    return;
   }
-  if (hit("#pickReset")) return saveConfig({ draw_pick: null });
+  if (hit("#newPoll")) { S.newPoll = true; return again("poll"); }
+  if (hit("#cancelPoll")) { S.newPoll = false; return again("poll"); }
+  if (hit("#closePoll")) {
+    if (!confirm("투표를 닫을까요? 결과는 사라집니다.")) return;
+    S.newPoll = false;
+    return saveConfig({ poll: null });
+  }
+  if (hit("#makePoll")) {
+    const q = ($("pollQ")?.value ?? "").trim();
+    const opts = lines($("pollOpts")?.value, MAX_CHOICES);
+    if (!q) return $("pollQ")?.focus();
+    if (opts.length < 2) return toast("선택지를 2개 이상 적어주세요");
+    S.newPoll = false;
+    return saveConfig({ poll: makePoll(q, opts) });
+  }
+  const pick = hit("[data-pick]");
+  if (pick) {
+    const poll = S.config?.poll;
+    if (!poll?.id) return;
+    const k = Number(pick.dataset.pick);
+    const off = Number(S.mine?.poll_pick) === k && S.mine?.poll_id === poll.id;
+    await pushVote(off
+      ? { poll_id: null, poll_pick: null, poll_at: null }
+      : { poll_id: poll.id, poll_pick: k, poll_at: new Date().toISOString() });
+    pulse(`.pollbox [data-pick="${k}"]`);
+    return again("poll");
+  }
+
+  // 🪜 사다리 타기
+  if (hit("#makeLadder")) {
+    const top = lines($("ladTop")?.value, LADDER_MAX);
+    const bot = lines($("ladBot")?.value, LADDER_MAX);
+    if (top.length < LADDER_MIN) return toast(`참가자가 ${LADDER_MIN}명은 있어야 해요`);
+    if (top.length !== bot.length) return toast(`결과도 ${top.length}개로 맞춰주세요`);
+    return saveConfig({ ladder: { ladder: makeLadder(top.length), top, bot, picked: {}, at: new Date().toISOString() } });
+  }
+  if (hit("#resetLadder")) return saveConfig({ ladder: null });
+  const climb = hit("[data-climb]");
+  if (climb) return climbLadder(Number(climb.dataset.climb));
+
+  // 🌟 오늘의 질문
+  if (hit("#qaSend")) {
+    const ta = $("qaText"), body = ta.value.trim();
+    if (!body) return ta.focus();
+    try {
+      await db.addPost({ body: answerBody(questionOfDay().i, body), kind: "qa", nick: S.me.nick || "익명" });
+      await refresh("posts");
+      again("dailyq");
+    } catch { toast("남기지 못했어요"); }
+    return;
+  }
 
   // QR
   if (hit("#copyUrl")) {
@@ -931,6 +989,77 @@ async function onSheetClick(e) {
     applyTheme(next);
     return again("config");
   }
+}
+
+/* ── 재미 기능 동작 ───────────────────────────────────────────────────── */
+
+/** 여러 줄 입력칸을 목록으로. 빈 줄과 앞뒤 공백은 버립니다. */
+const lines = (text, max) =>
+  String(text ?? "").split("\n").map((x) => x.trim()).filter(Boolean).slice(0, max);
+
+/**
+ * 룰렛. 결과를 먼저 뽑아 서버에 적고, 그 각도로 원판을 돌립니다.
+ * 각자 자기 폰에서 따로 돌리면 결과가 달라져서 아무 소용이 없으니까요.
+ */
+async function spinWheel() {
+  if (S.spinning) return;
+  const items = wheelItems(S.config);
+  const pick = Math.floor(Math.random() * items.length);
+  S.spinning = true;
+  turnWheel(pick, items.length);
+  try {
+    await saveConfig({ roulette: { items, pick, at: new Date().toISOString() } });
+  } finally {
+    setTimeout(() => { S.spinning = false; }, 4200);
+  }
+}
+
+/** 실제로 돌리는 부분. 다른 사람이 돌려도 이 함수가 불립니다. */
+function turnWheel(pick, n) {
+  const g = $("wheelSpin");
+  if (!g) return;
+  const deg = REDUCED() ? spinAngle(pick, n, 0) : spinAngle(pick, n);
+  g.style.transition = REDUCED() ? "none" : "transform 4s cubic-bezier(.16,.84,.26,1)";
+  g.style.transform = `rotate(${deg}deg)`;
+  if (!REDUCED()) setTimeout(() => replay($("wheelWin"), "bump", 700), 4000);
+}
+
+/** 시트를 다시 그렸을 때, 이미 나온 결과 위치에 원판을 얹어둡니다. */
+function restWheel() {
+  const r = S.config?.roulette;
+  const g = $("wheelSpin");
+  if (!g || r?.pick == null) return;
+  g.style.transition = "none";
+  g.style.transform = `rotate(${spinAngle(r.pick, wheelItems(S.config).length, 0)}deg)`;
+}
+
+/** 사다리를 한 칸에서 타고 내려갑니다. 지나간 길을 선으로 그려요. */
+async function climbLadder(start) {
+  const L = S.config?.ladder;
+  if (!L?.ladder) return;
+  const { end, path } = walkLadder(L.ladder, start);
+
+  const W = 40, H = 26, PAD = 14;
+  const d = path.map((pt, i) => {
+    const x = PAD + pt.x * W, y = 30 + pt.y * H;
+    return i === 0 ? `M ${x} ${y}` : `L ${x} ${y}`;
+  }).join(" ") + ` L ${PAD + end * W} ${30 + L.ladder.rows * H}`;
+
+  const el = $("ladPath");
+  if (el) {
+    el.setAttribute("d", d);
+    if (!REDUCED()) {
+      const len = el.getTotalLength();
+      el.style.transition = "none";
+      el.style.strokeDasharray = len;
+      el.style.strokeDashoffset = len;
+      void el.getBoundingClientRect();
+      el.style.transition = "stroke-dashoffset 1.4s cubic-bezier(.4,0,.2,1)";
+      el.style.strokeDashoffset = "0";
+    }
+  }
+  toast(`${L.top[start]} → ${L.bot[end]}`);
+  await saveConfig({ ladder: { ...L, picked: { ...(L.picked ?? {}), [start]: end } } });
 }
 
 /* ── 시작 ─────────────────────────────────────────────────────────────── */
