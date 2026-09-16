@@ -26,6 +26,9 @@ export const periodOf = (h) => {
   return i < 0 ? null : i + 1;
 };
 
+/** "23분 뒤 점심". 1분 안쪽이면 초 세는 대신 "곧"으로 뭉갭니다. */
+const until = (ms, what) => (ms < 60000 ? `곧 ${what}` : `${Math.ceil(ms / 60000)}분 뒤 ${what}`);
+
 const hhmm = (ts) => {
   const d = new Date(ts);
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
@@ -46,22 +49,23 @@ export function scheduleNow(now = Date.now()) {
   const day = d.getDay();
 
   if (day === 0 || day === 6)
-    return { phase: "off", icon: "🛋", label: "수업 없음", note: "오늘은 수업이 없는 날이에요.", left: null, endsAt: null, period: null };
+    return { phase: "off", icon: "🛋", label: "수업 없음", short: null, note: "오늘은 수업이 없는 날이에요.", left: null, endsAt: null, period: null };
 
   const dayStart = at(DAY_START, 0);
   const dayEnd = at(DAY_END, CLASS_MIN);
 
   if (now < dayStart)
-    return { phase: "before", icon: "🌅", label: `${String(DAY_START).padStart(2, "0")}:00 시작`,
+    return { phase: "before", icon: "🌅", label: "수업 전", short: `${hhmm(dayStart)} 에 1교시`,
              note: `첫 교시는 ${hhmm(dayStart)} 에 시작해요.`, left: dayStart - now, endsAt: dayStart, period: null };
 
   if (now >= dayEnd)
-    return { phase: "done", icon: "🏠", label: "퇴실", note: "오늘 수업 끝 — 퇴실하고 들어가세요.", left: null, endsAt: null, period: null };
+    return { phase: "done", icon: "🏠", label: "퇴실", short: null, note: "오늘 수업 끝 — 퇴실하고 들어가세요.", left: null, endsAt: null, period: null };
 
   const lunchFrom = at(LUNCH_FROM, CLASS_MIN), lunchTo = at(LUNCH_TO, 0);
   if (now >= lunchFrom && now < lunchTo) {
     const next = periodOf(LUNCH_TO);
     return { phase: "lunch", icon: "🍚", label: "점심", left: lunchTo - now, endsAt: lunchTo, period: null,
+             short: until(lunchTo - now, `${next}교시`),
              note: `점심시간 · ${hhmm(lunchTo)} 에 ${next}교시가 시작해요.` };
   }
 
@@ -71,10 +75,13 @@ export function scheduleNow(now = Date.now()) {
     // 마지막 교시 뒤에는 쉬는 시간이 아니라 퇴실이고, 11교시 뒤는 점심입니다
     const after = h === DAY_END ? "퇴실" : h === LUNCH_FROM ? "점심" : "쉬는 시간";
     return { phase: "class", icon: "📘", label: period ? `${period}교시` : "수업", left: ends - now, endsAt: ends, period,
+             short: until(ends - now, after),
              note: `${period ? `${period}교시` : "수업 중"} · ${mins(ends - now)}분 뒤 ${after} (${hhmm(ends)})` };
   }
 
   const ends = at(h + 1, 0), next = periodOf(h + 1);
+  const nextName = next ? `${next}교시` : "다음 교시";
   return { phase: "break", icon: "☕", label: "쉬는 시간", left: ends - now, endsAt: ends, period: null,
-           note: `쉬는 시간 · ${mins(ends - now)}분 뒤 ${next ? `${next}교시` : "다음 교시"} (${hhmm(ends)})` };
+           short: until(ends - now, nextName),
+           note: `쉬는 시간 · ${mins(ends - now)}분 뒤 ${nextName} (${hhmm(ends)})` };
 }

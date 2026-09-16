@@ -241,11 +241,13 @@ export const TRIVIA = [
   "에어컨 실외기 주변이 막혀 있으면 냉방 능력이 급감합니다. 실외기가 뜨거운 공기를 다시 빨아들이기 때문이에요.",
 ];
 
-export function triviaOfToday(d = new Date()) {
+export function triviaIndexOfToday(d = new Date()) {
   const start = new Date(d.getFullYear(), 0, 0);
   const day = Math.floor((d - start) / 86400000);
-  return TRIVIA[day % TRIVIA.length];
+  return day % TRIVIA.length;
 }
+
+export const triviaOfToday = (d = new Date()) => TRIVIA[triviaIndexOfToday(d)];
 
 // ── 정각 리듬 ────────────────────────────────────────────────────────────
 // 투표는 아무 때나 받지만, 실제로 리모컨을 만질지 판단하는 건 매 정각입니다.

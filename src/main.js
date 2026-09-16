@@ -25,7 +25,7 @@ import { ZONES, SEAT_ROWS } from "./zones.js";
 import {
   resolveSeason, zoneBreakdown, airflow, airflowText,
   fetchWeather, weatherLabel, discomfortIndex, discomfortLabel,
-  triviaOfToday, TRIVIA, countdownText,
+  triviaIndexOfToday, TRIVIA, countdownText,
 } from "./climate.js";
 import { scheduleNow } from "./schedule.js";
 import { drawRidge, drawSpark, drawHourly, P } from "./chart.js";
@@ -255,20 +255,25 @@ function renderOutside() {
     (dl ? `<span class="oc ${esc(dl.tone)}">${esc(dl.text)}</span>` : `<span class="oc">${esc(word)}</span>`);
 }
 
-/** 지금이 수업인지 쉬는 시간인지. 손으로 켠 쉬는 시간이 있으면 그게 우선입니다. */
-function renderNow() {
-  const brk = breakState();
-  const sc = S.sched ?? scheduleNow();
+/**
+ * 띠에는 잡학을 깔았습니다. 지금 몇 교시인지는 위 칩이 말해주니까요.
+ * 눌러서 다음 걸로 넘길 수 있고, 바깥·잡학 시트와 같은 번호를 씁니다.
+ */
+function trivia() {
+  if (S.triviaIdx === null) S.triviaIdx = triviaIndexOfToday();
+  return TRIVIA[S.triviaIdx % TRIVIA.length];
+}
+
+function renderNow(animate = false) {
   const el = $("nowBar");
-  if (brk) {
-    el.className = "nowbar break";
-    el.innerHTML = `<em>☕</em><span>쉬는 시간 · ${countdownText(brk.left)} 남음</span>`;
-    return;
-  }
-  el.className = `nowbar ${sc.phase}`;
-  el.innerHTML = `<em>${sc.icon}</em><span>${esc(sc.note)}</span>`;
-  if (S.nowSeen !== null && S.nowSeen !== sc.phase) replay(el, "swap", 700);
-  S.nowSeen = sc.phase;
+  el.innerHTML = `<em>💡</em><span>${esc(trivia())}</span><i>다음 ›</i>`;
+  if (animate) replay(el, "swap", 700);
+}
+
+function nextTrivia() {
+  S.triviaIdx = ((S.triviaIdx ?? triviaIndexOfToday()) + 1) % TRIVIA.length;
+  renderNow(true);
+  if (S.sheet === "info") renderSheet("info", summarise(S.votes, band()), band());
 }
 
 /** 17:50 이후에만 뜨는 퇴실 칸. */
@@ -619,7 +624,7 @@ function renderSheet(key, c, b) {
   const body = $("sheetBody");
   if (key === "board") body.innerHTML = sh.boardSheet(S);
   else if (key === "draw") body.innerHTML = sh.drawSheet(S, toMembers(S.votes));
-  else if (key === "info") body.innerHTML = sh.infoSheet(S, b, S.triviaIdx === null ? triviaOfToday() : TRIVIA[S.triviaIdx % TRIVIA.length]);
+  else if (key === "info") body.innerHTML = sh.infoSheet(S, b, trivia());
   else if (key === "config") body.innerHTML = sh.configSheet(S, c, b, lsGet("roomtemp.theme") || "system");
   else if (key === "qr") { body.innerHTML = sh.qrSheet(); makeQR(); }
   else if (key === "stats") {
@@ -684,16 +689,15 @@ function tickClock() {
 
   if (brk) {
     // 설정에서 손으로 켠 쉬는 시간이 시간표보다 우선입니다
-    chip.textContent = `☕ ${countdownText(brk.left)}`;
+    chip.textContent = `☕ 쉬는 시간 · ${countdownText(brk.left)}`;
     chip.className = "chip live";
     S.breakSeen = brk.until;
   } else {
     if (S.breakSeen) { toast("쉬는 시간 끝 — 자리로 돌아와 주세요"); S.breakSeen = null; }
-    chip.textContent = sc.left === null ? `${sc.icon} ${sc.label}` : `${sc.icon} ${sc.label} · ${countdownText(sc.left)}`;
+    chip.textContent = sc.short ? `${sc.icon} ${sc.label} · ${sc.short}` : `${sc.icon} ${sc.label}`;
     chip.className = `chip${sc.phase === "break" || sc.phase === "lunch" ? " live" : ""}` +
                      `${sc.phase === "class" && sc.left < 60e3 ? " due" : ""}`;
   }
-  if (S.tab === "temp") renderNow();
 
   const hour = startOfHour();
   if (S.lastHour === null) S.lastHour = hour;
@@ -774,6 +778,7 @@ function wire() {
   });
 
   $("leaveBtn").addEventListener("click", leaveForDay);
+  $("nowBar").addEventListener("click", nextTrivia);
 
   $("moreMenu").addEventListener("click", (e) => {
     const b = e.target.closest("[data-sheet]");
@@ -833,7 +838,7 @@ async function onSheetClick(e) {
     return;
   }
 
-  if (hit("#triviaNext")) { S.triviaIdx = ((S.triviaIdx ?? 0) + 1) % TRIVIA.length; return again("info"); }
+  if (hit("#triviaNext")) return nextTrivia();
 
   // 뽑기
   const g = hit("[data-groups]");

@@ -8,7 +8,7 @@ name: GitHub Pages 배포
 
 on:
   push:
-    branches: [master]
+    branches: [main]
   workflow_dispatch: # 깃허브 화면에서 손으로도 돌릴 수 있게
 
 permissions:
