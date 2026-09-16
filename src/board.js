@@ -84,7 +84,7 @@ export const openQuestions = (posts) => posts.filter((p) => p.kind === "q" && !p
  * @param {string}   uid    내 uid (내 글에만 삭제 버튼)
  * @param {string}   filter "all" | "q" | "req" | "info" | "chat"
  */
-export function feedHTML(posts, uid, filter = "all") {
+export function feedHTML(posts, uid, filter = "all", admin = false) {
   const list = filter === "all" ? posts : posts.filter((p) => p.kind === filter);
 
   if (!list.length) {
@@ -118,11 +118,15 @@ export function feedHTML(posts, uid, filter = "all") {
         `<article class="post">` +
           `<div class="who"><i class="dot" style="background:${nickColor(p.nick)}">${esc(nickInitial(p.nick))}</i>` +
           `<span>${esc(p.nick || "익명")}</span></div>` +
-          `<div class="bubble ${p.pinned ? "pin" : ""} ${kind.cls} ${isQ && p.answered ? "done" : ""}">` +
+          `<div class="bubble ${p.pinned ? "pin" : ""} ${kind.cls} ${isQ && p.answered ? "done" : ""}${p.hidden ? " hid" : ""}">` +
             (kind.tag ? `<span class="tag">${kind.tag}</span> ` : "") +
             (p.pinned ? `<span class="tag pinned">📌 고정</span> ` : "") +
             (isQ && p.answered ? `<span class="tag done">✅ 답변 완료</span> ` : "") +
-            `<div class="txt">${linkify(p.body)}</div>` +
+            // 신고가 쌓인 글은 접어둡니다. 눌러야 펴지니 지나가다 안 보게 돼요.
+            (p.hidden
+              ? `<details class="hidwrap"><summary>🚨 신고 ${p.reports}건 — 눌러야 보입니다</summary>` +
+                `<div class="txt">${linkify(p.body)}</div></details>`
+              : `<div class="txt">${linkify(p.body)}</div>`) +
             `<div class="bmeta">` +
               `<span>${esc(timeAgo(p.created_at))}</span>` +
               `<button class="bact ${p.liked_by_me ? "on" : ""}" data-act="like" data-id="${esc(p.id)}" ` +
@@ -134,7 +138,12 @@ export function feedHTML(posts, uid, filter = "all") {
                 : "") +
               `<button class="bact ${p.pinned ? "on" : ""}" data-act="pin" data-id="${esc(p.id)}" ` +
                 `aria-pressed="${!!p.pinned}">📌 ${p.pinned ? "고정 해제" : "고정"}</button>` +
-              (mine ? `<button class="bact me" data-act="del" data-id="${esc(p.id)}">삭제</button>` : "") +
+              (mine
+                ? `<span class="bact me dim">내 글</span>`
+                : `<button class="bact ${p.reported_by_me ? "on" : ""}" data-act="rep" data-id="${esc(p.id)}" ` +
+                  `aria-pressed="${!!p.reported_by_me}">🚨 ${p.reported_by_me ? "신고함" : "신고"}` +
+                  `${p.reports ? ` ${p.reports}` : ""}</button>`) +
+              (admin ? `<button class="bact danger" data-act="del" data-id="${esc(p.id)}">🛡 삭제</button>` : "") +
             `</div>` +
           `</div>` +
         `</article>`

@@ -429,6 +429,30 @@ a { color: var(--accent); word-break: break-all; }
 .lcap.foot { fill: var(--ink-2); }
 .mini.done { background: var(--accent-w); border-color: var(--accent); color: var(--accent); font-weight: 600; }
 
+/* 🔒 관리 잠금 */
+.lockcard { border-color: color-mix(in srgb, var(--warn) 32%, var(--line)); background: var(--warn-w); }
+.lockcard h3 { color: var(--warn); }
+.lockcard.open { border-color: color-mix(in srgb, var(--good) 32%, var(--line)); background: var(--good-w); }
+.lockcard .lk { font-size: 12.5px; font-weight: 600; color: var(--good); }
+.hint.locked { color: var(--ink-3); font-style: italic; margin-top: 8px; }
+
+/* 🚨 신고 · 잠금 */
+.bact.danger { color: var(--hot); font-weight: 600; }
+.bact.me.dim { color: var(--ink-3); cursor: default; }
+.bubble.hid { background: var(--card-2); border-style: dashed; }
+.hidwrap summary { font-size: 11.5px; color: var(--warn); font-weight: 600; cursor: pointer; padding: 3px 0; list-style: none; }
+.hidwrap summary::-webkit-details-marker { display: none; }
+.hidwrap summary::before { content: "▸ "; }
+.hidwrap[open] summary::before { content: "▾ "; }
+.hidwrap .txt { margin-top: 6px; opacity: .75; }
+.blist { display: flex; flex-direction: column; gap: 6px; margin-top: 9px; }
+.brow { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--card-2); }
+.brow code { font-family: ui-monospace, monospace; font-size: 11.5px; }
+.brow .dim { font-size: 11.5px; margin-right: auto; }
+.blockbar { margin: 0 0 10px; padding: 11px 13px; border-radius: 12px; font-size: 12.5px; line-height: 1.6;
+  background: var(--hot-w); border: 1px solid color-mix(in srgb, var(--hot) 35%, var(--line)); color: var(--hot); }
+
 /* 🌟 오늘의 질문 */
 .q-of-day { background: linear-gradient(135deg, var(--accent-w), var(--card)); border-color: color-mix(in srgb, var(--accent) 28%, var(--line)); }
 .q-of-day .qtag { font-size: 10.5px; font-weight: 700; color: var(--accent); letter-spacing: .02em; }
@@ -648,12 +672,43 @@ th { color: var(--ink-3); font-size: 10.5px; font-weight: 500; }
 .chatrow textarea { flex: 1 1 auto; min-height: 42px; max-height: 96px; padding: 10px 12px; }
 .chatrow .btn { flex: 0 0 auto; padding: 11px 14px; }
 .chatbar .hint { font-size: 10.5px; margin: 6px 2px 0; }
-/* 내가 쓴 말은 아바타를 오른쪽으로 보내 한눈에 구분되게 */
-.post.me { grid-template-columns: minmax(0, 1fr) auto; }
-.post.me .who { order: 2; }
-.post.me .bubble { order: 1; border-top-left-radius: 12px; border-top-right-radius: 3px;
-  background: var(--accent-w); border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); }
-.post.me .bmeta { justify-content: flex-end; }
+/* 말풍선 — 둥글고 꼬리 달린 메신저 모양. 닉네임은 풍선 위에 크게. */
+.feed.chat { gap: 14px; }
+.chatline { align-items: flex-end; gap: 8px; }
+.chatline .who { width: 32px; }
+.chatline .dot { width: 32px; height: 32px; font-size: 14px;
+  box-shadow: 0 2px 6px -1px rgba(0, 0, 0, .25); border: 2px solid var(--card); }
+.chatline .bwrap { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 0; }
+.chatline .bnick { font-size: 11.5px; font-weight: 700; letter-spacing: -.01em; padding-left: 3px; }
+.chatline .bwhen { font-size: 9.5px; color: var(--ink-3); padding-left: 3px; }
+.chatline .bubble {
+  position: relative; max-width: 100%; padding: 10px 14px;
+  border-radius: 18px 18px 18px 5px; background: var(--card); border: 1px solid var(--line);
+  box-shadow: 0 2px 8px -3px rgba(0, 0, 0, .13);
+}
+.chatline .bubble .txt { font-size: 14px; line-height: 1.55; }
+/* 풍선 꼬리 */
+.chatline .bubble::after {
+  content: ""; position: absolute; left: -5px; bottom: -1px; width: 12px; height: 12px;
+  background: inherit; border-left: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  border-radius: 0 0 0 10px; clip-path: polygon(0 100%, 100% 100%, 0 0);
+}
+
+/* 내가 쓴 말은 오른쪽에, 파란 풍선으로 */
+.chatline.me { grid-template-columns: minmax(0, 1fr) auto; }
+.chatline.me .who { order: 2; }
+.chatline.me .bwrap { order: 1; align-items: flex-end; }
+.chatline.me .bnick, .chatline.me .bwhen { padding: 0 3px 0 0; }
+.chatline.me .bubble {
+  border-radius: 18px 18px 5px 18px;
+  background: var(--accent); border-color: var(--accent-d); color: #fff;
+  box-shadow: 0 3px 10px -4px var(--accent);
+}
+.chatline.me .bubble::after {
+  left: auto; right: -5px; border-left: 0; border-right: 1px solid var(--accent-d);
+  border-radius: 0 0 10px 0; clip-path: polygon(100% 100%, 0 100%, 100% 0);
+}
+.chatline.me .bnick { color: var(--accent) !important; }
 
 /* ── 게시판 ──────────────────────────────────────────────────────── */
 .post { animation: postIn .38s var(--out) backwards; }

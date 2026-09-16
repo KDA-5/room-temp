@@ -37,6 +37,7 @@ import {
   questionOfDay, answerBody,
 } from "./fun.js";
 import * as sh from "./sheets.js";
+import { isClean, BAD_MSG } from "./filter.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -45,6 +46,18 @@ const LAT = Number(import.meta.env.VITE_LAT) || 37.5447;   // 서울 성수동
 const LON = Number(import.meta.env.VITE_LON) || 127.0557;
 const FEEL_MS = 3 * 3600e3;
 const STEP = 1.0;   // 🥶/🥵 한 번에 움직이는 폭
+
+/**
+ * 관리자 열쇠말.
+ *
+ * 열쇠말 자체는 **서버(Supabase)에만** 있습니다. 여기서는 사용자가 친 말을
+ * 그대로 서버에 보내 맞는지만 물어봐요(admin_check). 그리고 실제로 남의 글을
+ * 지우는 것도 서버 함수가 열쇠말을 다시 확인한 뒤에 합니다.
+ *
+ * 그래서 브라우저 개발자 도구로 화면을 아무리 뜯어고쳐도 열쇠말 없이는
+ * 남의 글이 지워지지 않습니다. 화면 가리기가 아니라 진짜 권한이에요.
+ */
+const rememberKey = (k) => { S.adminKey = k; lsSet("roomtemp.key", k); };
 
 const TAB_TITLE = { temp: "강의실 온도", lecture: "강의 어때요?", chat: "익명 채팅", more: "더보기" };
 
@@ -71,6 +84,7 @@ const S = {
   tab: "temp", sheet: null, filter: "all", kind: "chat",
   triviaIdx: null, barOpen: false, lastHour: null, breakSeen: null,
   editSlots: false, newPoll: false, spinning: false,
+  admin: false, adminKey: "", blocked: [], myBlock: null,
   sched: null, phaseSeen: null, chatSeen: 0, left: false,
   matchSeen: null, nowSeen: null,
 };
@@ -215,16 +229,21 @@ function render() {
 }
 
 /**
- * 숫자 둘을 나란히 둡니다 — 지금 실내가 몇 도인지, 그리고 다들 몇 도를 원하는지.
+ * 숫자 둘을 나란히 둡니다 — 지금이 몇 도인지, 그리고 다들 몇 도를 원하는지.
  * 하나만 보여주면 "그래서 지금 뭘 해야 하는데"가 안 보이거든요.
  *
- * 지금 실내 온도는 설정에서 "이 온도로 맞췄어요"로 남긴 값(applied)이 먼저고,
- * 없으면 손으로 잰 실내 온도(indoor_t)를 씁니다.
+ * 왼쪽 숫자는 두 군데서 옵니다. 설정에서 "이 온도로 맞췄어요"로 남긴
+ * **에어컨 설정값**(applied)이 먼저고, 그게 없을 때만 손으로 잰
+ * **실측 실내 온도**(indoor_t)를 씁니다. 둘은 다른 값이라 — 에어컨을 24로
+ * 맞춰도 방이 24인 건 아니니까 — 라벨도 출처에 맞춰 같이 바꿉니다.
  */
 function renderHero(c) {
   const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
-  const applied = num(S.config?.applied) ?? num(S.config?.indoor_t);
+  const set = num(S.config?.applied), room = num(S.config?.indoor_t);
+  const applied = set ?? room;
   const want = c.n ? c.setpoint : null;
+
+  $("nowLab").textContent = set !== null ? "지금 에어컨 설정" : room !== null ? "지금 실내 온도" : "지금 에어컨 설정";
 
   setNum($("nowTemp"), applied);
   setNum($("setpoint"), want);
@@ -260,7 +279,10 @@ function renderOutside() {
   const [word, icon] = weatherLabel(w.code);
   const dl = discomfortLabel(discomfortIndex(w.t, w.rh));
   el.hidden = false;
+  const room = Number(S.config?.indoor_t);
   el.innerHTML =
+    (Number.isFinite(room) && Number.isFinite(Number(S.config?.applied))
+      ? `<span class="oc"><em>🏫</em>실내 <b>${fmt(room)}°</b></span>` : "") +
     `<span class="oc"><em>${icon}</em>성수동 <b>${fmt(w.t)}°</b></span>` +
     (Number.isFinite(w.rh) ? `<span class="oc">습도 <b>${Math.round(w.rh)}%</b></span>` : "") +
     (Number.isFinite(w.feels) ? `<span class="oc">체감 <b>${fmt(w.feels)}°</b></span>` : "") +
@@ -629,6 +651,7 @@ function sendChat() {
   if (!ta) return;
   const msg = ta.value.trim().slice(0, 80);
   if (!msg) return ta.focus();
+  if (!isClean(msg)) return toast(BAD_MSG);
   const at = Date.now();
   db.setPresence({ nick: S.me.nick || "익명", msg, msgAt: at });
   S.chatlog.push({ nick: S.me.nick || "익명", msg, at, mine: true });
@@ -664,7 +687,7 @@ function renderSheet(key, c, b) {
   else if (key === "ladder") body.innerHTML = sh.ladderSheet(S);
   else if (key === "dailyq") body.innerHTML = sh.dailyqSheet(S);
   else if (key === "info") body.innerHTML = sh.infoSheet(S, b, trivia());
-  else if (key === "config") body.innerHTML = sh.configSheet(S, c, b, lsGet("roomtemp.theme") || "system");
+  else if (key === "config") body.innerHTML = sh.configSheet(S, c, b, lsGet("roomtemp.theme") || "system", S.admin);
   else if (key === "qr") { body.innerHTML = sh.qrSheet(); makeQR(); }
   else if (key === "stats") {
     body.innerHTML = sh.statsSheet(S, c, roomSize());
@@ -831,6 +854,7 @@ function wire() {
   $("sheetBody").addEventListener("click", onSheetClick);
   $("sheetBody").addEventListener("input", (e) => {
     if (e.target.id === "nickIn") {
+      if (!isClean(e.target.value)) { toast(BAD_MSG); e.target.value = S.me.nick || ""; return; }
       S.me.nick = e.target.value.slice(0, 12);
       saveMe();
       pushVote({ nick: S.me.nick }, { debounce: true });
@@ -855,6 +879,7 @@ async function onSheetClick(e) {
   if (hit("#postBtn")) {
     const ta = $("postText"), body = ta.value.trim();
     if (!body) return ta.focus();
+    if (!isClean(body)) return toast(BAD_MSG);
     try {
       await db.addPost({ body: body.slice(0, 300), kind: S.kind, nick: S.me.nick || "익명" });
       ta.value = "";
@@ -872,9 +897,16 @@ async function onSheetClick(e) {
       if (a === "like") await db.setLike(id, !post.liked_by_me);
       else if (a === "ans") await db.toggleAnswered(id);
       else if (a === "pin") await db.togglePin(id);
-      else if (a === "del") { if (!confirm("이 글을 지울까요?")) return; await db.deletePost(id); }
+      else if (a === "rep") {
+        await db.setReport(id, !post.reported_by_me);
+        toast(post.reported_by_me ? "신고를 취소했어요" : "신고했습니다. 2건부터 접히고 10건이면 글쓰기가 잠깁니다");
+      } else if (a === "del") {
+        if (!S.admin) return toast("관리자만 지울 수 있어요");
+        if (!confirm("이 글을 지울까요? 되돌릴 수 없습니다.")) return;
+        await db.adminDeletePost(S.adminKey, id);
+      }
       await refresh("posts");
-      again("board");
+      again(S.sheet === "dailyq" ? "dailyq" : "board");
     } catch (err) { toast(err.message?.slice(0, 70) || "처리하지 못했어요"); }
     return;
   }
@@ -887,6 +919,7 @@ async function onSheetClick(e) {
   if (hit("#saveSlots")) {
     const items = lines($("slotText")?.value, MAX_SLOTS);
     if (items.length < MIN_SLOTS) return toast(`${MIN_SLOTS}개는 있어야 해요`);
+    if (items.some((x) => !isClean(x))) return toast(BAD_MSG);
     S.editSlots = false;
     return saveConfig({ roulette: { items, pick: null } });
   }
@@ -911,6 +944,7 @@ async function onSheetClick(e) {
     const q = ($("pollQ")?.value ?? "").trim();
     const opts = lines($("pollOpts")?.value, MAX_CHOICES);
     if (!q) return $("pollQ")?.focus();
+    if (!isClean(q) || opts.some((o) => !isClean(o))) return toast(BAD_MSG);
     if (opts.length < 2) return toast("선택지를 2개 이상 적어주세요");
     S.newPoll = false;
     return saveConfig({ poll: makePoll(q, opts) });
@@ -934,6 +968,7 @@ async function onSheetClick(e) {
     const bot = lines($("ladBot")?.value, LADDER_MAX);
     if (top.length < LADDER_MIN) return toast(`참가자가 ${LADDER_MIN}명은 있어야 해요`);
     if (top.length !== bot.length) return toast(`결과도 ${top.length}개로 맞춰주세요`);
+    if ([...top, ...bot].some((x) => !isClean(x))) return toast(BAD_MSG);
     return saveConfig({ ladder: { ladder: makeLadder(top.length), top, bot, picked: {}, at: new Date().toISOString() } });
   }
   if (hit("#resetLadder")) return saveConfig({ ladder: null });
@@ -944,6 +979,7 @@ async function onSheetClick(e) {
   if (hit("#qaSend")) {
     const ta = $("qaText"), body = ta.value.trim();
     if (!body) return ta.focus();
+    if (!isClean(body)) return toast(BAD_MSG);
     try {
       await db.addPost({ body: answerBody(questionOfDay().i, body), kind: "qa", nick: S.me.nick || "익명" });
       await refresh("posts");
@@ -957,6 +993,37 @@ async function onSheetClick(e) {
     try { await navigator.clipboard.writeText(location.origin + location.pathname); toast("주소를 복사했어요"); }
     catch { toast("복사에 실패했어요 — 주소창에서 직접 복사해 주세요"); }
     return;
+  }
+
+  // 설정 — 열쇠말 (서버가 확인합니다)
+  if (hit("#unlockBtn")) {
+    const v = ($("keyIn")?.value ?? "").trim();
+    if (!v) return $("keyIn")?.focus();
+    try {
+      if (!(await db.adminCheck(v))) return toast("열쇠말이 다릅니다");
+    } catch { return toast("확인하지 못했어요"); }
+    S.admin = true;
+    rememberKey(v);
+    await loadBlocked();
+    toast("관리 권한을 켰어요");
+    return again("config");
+  }
+  if (hit("#lockBtn")) {
+    S.admin = false;
+    S.blocked = [];
+    rememberKey("");
+    toast("다시 잠갔어요");
+    return again("config");
+  }
+  if (hit("#refreshBlocked")) { await loadBlocked(); return again("config"); }
+  const unb = hit("[data-unblock]");
+  if (unb) {
+    try {
+      await db.adminUnblock(S.adminKey, unb.dataset.unblock);
+      await loadBlocked();
+      toast("잠금을 풀었어요");
+    } catch (err) { toast(err.message?.slice(0, 70) || "풀지 못했어요"); }
+    return again("config");
   }
 
   // 설정
@@ -1062,9 +1129,23 @@ async function climbLadder(start) {
   await saveConfig({ ladder: { ...L, picked: { ...(L.picked ?? {}), [start]: end } } });
 }
 
+/** 관리자 화면에 띄울 잠긴 계정 목록. 계정 번호만 보이고 신원은 없습니다. */
+async function loadBlocked() {
+  if (!S.admin || !S.adminKey) { S.blocked = []; return; }
+  try { S.blocked = await db.adminBlocked(S.adminKey); }
+  catch { S.blocked = []; }
+}
+
+/** 내가 잠겼는지. 잠겼으면 게시판 위에 알려줍니다 — 왜 안 올라가는지 알아야 하니까요. */
+async function checkMyBlock() {
+  try { S.myBlock = await db.myStrikes(); } catch { S.myBlock = null; }
+}
+
 /* ── 시작 ─────────────────────────────────────────────────────────────── */
 async function boot() {
   applyTheme(lsGet("roomtemp.theme") || "system");
+
+  S.adminKey = lsGet("roomtemp.key") || "";
 
   const raw = lsGet("roomtemp.me");
   try { S.me = raw ? JSON.parse(raw) : {}; } catch { S.me = {}; }
@@ -1111,6 +1192,13 @@ async function boot() {
   });
 
   db.setPresence({ nick: S.me.nick || "익명", msg: "", msgAt: 0 });
+
+  // 저장해둔 열쇠말이 아직 유효한지 서버에 다시 물어봅니다
+  if (S.adminKey) {
+    try { S.admin = await db.adminCheck(S.adminKey); } catch { S.admin = false; }
+    if (S.admin) await loadBlocked(); else rememberKey("");
+  }
+  await checkMyBlock();
   await refresh();
   db.subscribe((scope) => refresh(scope));
   db.recordCheckpoint().then((row) => { if (row?.created) refresh("meta"); }).catch(() => {});

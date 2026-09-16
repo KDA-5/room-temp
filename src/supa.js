@@ -184,6 +184,54 @@ export async function addPost(row) {
   ping("posts");
 }
 
+/** 신고 넣기/빼기. 같은 글은 한 번만 신고됩니다 (기본키가 막아줘요). */
+export async function setReport(postId, on) {
+  if (!supabase || !uid) throw new Error("아직 로그인 전이에요");
+  const { error } = on
+    ? await supabase.from("post_reports").insert({ post_id: postId, uid })
+    : await supabase.from("post_reports").delete().eq("post_id", postId).eq("uid", uid);
+  if (error && error.code !== "23505") throw error;   // 이미 신고한 건 그냥 넘어갑니다
+  ping("posts");
+}
+
+/** 열쇠말이 맞는지 서버에 물어봅니다. 열쇠말 자체는 돌아오지 않아요. */
+export async function adminCheck(key) {
+  if (!supabase) return false;
+  const { data, error } = await supabase.rpc("admin_check", { p_key: key });
+  if (error) throw error;
+  return data === true;
+}
+
+/** 관리자 삭제. 열쇠말 검증이 서버에서 일어납니다. */
+export async function adminDeletePost(key, id) {
+  if (!supabase) throw new Error("설정이 안 됐어요");
+  const { error } = await supabase.rpc("admin_delete_post", { p_key: key, p_id: id });
+  if (error) throw error;
+  ping("posts");
+}
+
+/** 잠긴 계정 목록. uid 는 무작위라 누구인지는 여기서도 알 수 없습니다. */
+export async function adminBlocked(key) {
+  if (!supabase) return [];
+  const { data, error } = await supabase.rpc("admin_blocked", { p_key: key });
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function adminUnblock(key, targetUid) {
+  if (!supabase) throw new Error("설정이 안 됐어요");
+  const { error } = await supabase.rpc("admin_unblock", { p_key: key, p_uid: targetUid });
+  if (error) throw error;
+  ping("posts");
+}
+
+/** 내가 글쓰기 잠김 상태인지. 본인 행만 읽을 수 있습니다. */
+export async function myStrikes() {
+  if (!supabase || !uid) return null;
+  const { data } = await supabase.from("strikes").select("reports,blocked").eq("uid", uid).maybeSingle();
+  return data ?? null;
+}
+
 export async function deletePost(id) {
   if (!supabase) return;
   const { error } = await supabase.from("posts").delete().eq("id", id);

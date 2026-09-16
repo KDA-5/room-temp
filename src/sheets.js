@@ -64,7 +64,7 @@ export function boardSheet(S) {
     `</div><button class="btn accent" id="postBtn" type="button" style="margin-left:auto">올리기</button></div>` +
     `<p class="hint">고정 ${pinned}/${MAX_PIN} · 답변 대기 ${openQuestions(S.posts)}개 · 링크는 자동으로 눌러집니다.</p></div>` +
     `<div class="filters" id="filters">${filters}</div>` +
-    `<div class="feed" id="feed">${feedHTML(S.posts, S.uid, S.filter)}</div>`
+    `<div class="feed" id="feed">${feedHTML(S.posts, S.uid, S.filter, S.admin)}</div>`
   );
 }
 
@@ -109,10 +109,16 @@ export function statsSheet(S, c, size) {
 export function chatView(S) {
   const log = !S.chatlog.length
     ? `<p class="empty">아직 오간 말이 없어요.<br><span class="dim">지금 접속한 사람에게만 보입니다. 창을 닫으면 사라져요.</span></p>`
-    : `<div class="feed">` + S.chatlog.slice(-50).map((m) =>
-        `<div class="post${m.mine ? " me" : ""}"><div class="who"><i class="dot" style="background:${nickColor(m.nick)}">${esc(nickInitial(m.nick))}</i></div>` +
-        `<div class="bubble"><div class="txt">${esc(m.msg)}</div>` +
-        `<div class="bmeta"><span>${esc(m.nick)} · ${esc(ago(m.at))}</span></div></div></div>`).join("") + `</div>`;
+    : `<div class="feed chat">` + S.chatlog.slice(-50).map((m) => {
+        const col = nickColor(m.nick);
+        return `<div class="post chatline${m.mine ? " me" : ""}">` +
+          `<div class="who"><i class="dot" style="background:${col}">${esc(nickInitial(m.nick))}</i></div>` +
+          `<div class="bwrap">` +
+          `<span class="bnick" style="color:${col}">${esc(m.nick)}</span>` +
+          `<div class="bubble"><div class="txt">${esc(m.msg)}</div></div>` +
+          `<span class="bwhen">${esc(ago(m.at))}</span>` +
+          `</div></div>`;
+      }).join("") + `</div>`;
 
   return (
     `<div class="chatlog" id="chatLog">${log}</div>` +
@@ -284,7 +290,7 @@ export function ladderSheet(S) {
 export function dailyqSheet(S) {
   const { i, q } = questionOfDay();
   const answers = todaysAnswers(S.posts, i);
-  const mine = answers.find((a) => a.is_mine);
+  const mine = answers.find((a) => a.author === S.uid);
 
   const list = !answers.length
     ? `<p class="empty">아직 아무도 답하지 않았어요.<br><span class="dim">첫 줄을 남겨보세요.</span></p>`
@@ -292,14 +298,18 @@ export function dailyqSheet(S) {
         `<div class="post"><div class="who"><i class="dot" style="background:${nickColor(a.nick)}">${esc(nickInitial(a.nick))}</i></div>` +
         `<div class="bubble"><div class="txt">${esc(answerText(a.body))}</div>` +
         `<div class="bmeta"><span>${esc(a.nick || "익명")}</span>` +
-        (a.is_mine ? `<button class="bact me" data-act="del" data-id="${a.id}">지우기</button>` : "") +
+        (a.author === S.uid
+          ? `<span class="bact me dim">내 답</span>`
+          : `<button class="bact ${a.reported_by_me ? "on" : ""}" data-act="rep" data-id="${a.id}">` +
+            `🚨 ${a.reported_by_me ? "신고함" : "신고"}${a.reports ? ` ${a.reports}` : ""}</button>`) +
+        (S.admin ? `<button class="bact danger" data-act="del" data-id="${a.id}">🛡 삭제</button>` : "") +
         `</div></div></div>`).join("") + `</div>`;
 
   return (
     `<div class="card q-of-day"><span class="qtag">🌟 오늘의 질문</span><h3>${esc(q)}</h3>` +
     `<p class="hint">매일 자정에 새 질문으로 바뀝니다. 닉네임만 보여요.</p></div>` +
     (mine
-      ? `<div class="card"><p class="hint">이미 답하셨어요. 지우고 다시 쓸 수 있습니다.</p></div>`
+      ? `<div class="card"><p class="hint">오늘은 답하셨어요. 내일 새 질문으로 만나요.</p></div>`
       : `<div class="card compose"><textarea id="qaText" maxlength="120" placeholder="한 줄로 답해주세요…"></textarea>` +
         `<div class="row mt"><button class="btn accent" id="qaSend" type="button" style="margin-left:auto">남기기</button></div></div>`) +
     `<p class="hint" style="padding:0 2px">${answers.length}명이 답했어요</p>` + list
@@ -367,18 +377,47 @@ export function qrSheet() {
 }
 
 /* ── 설정 ───────────────────────────────────────────────────────── */
-export function configSheet(S, c, b, theme) {
+/**
+ * admin 이 false 면 36명이 같이 보는 값(에어컨 신고·계절·실측 온도)은
+ * 읽기만 되고 버튼이 사라집니다. 쉬는 시간·닉네임·테마처럼 각자 눌러도
+ * 되는 건 그대로 열어둬요.
+ */
+export function configSheet(S, c, b, theme, admin) {
   const applied = Number.isFinite(Number(S.config?.applied)) ? Number(S.config.applied) : null;
   const need = applied !== null && Math.abs(c.setpoint - applied) >= 0.5;
   const seasons = ["auto", ...Object.keys(SEASONS)].map((k) =>
     `<button type="button" data-season="${k}" aria-pressed="${(S.config?.season || "auto") === k}">${esc(k === "auto" ? "자동" : SEASONS[k].short)}</button>`).join("");
 
+  const blocked = S.blocked ?? [];
+  const lock = admin
+    ? `<div class="card lockcard open"><div class="row"><span class="lk">🔓 관리 버튼이 켜져 있습니다</span>` +
+      `<button class="mini" id="lockBtn" type="button" style="margin-left:auto">다시 잠그기</button></div>` +
+      `<p class="hint">게시판·오늘의 질문에 <b>🛡 삭제</b> 버튼이 생겼습니다. 열쇠말은 서버에서 확인해요.</p></div>` +
+      `<div class="card"><h3>글쓰기 잠긴 계정</h3>` +
+      `<p class="hint">신고가 10건 쌓이면 자동으로 잠깁니다. 계정 번호는 무작위라 ` +
+      `<b>누구인지는 관리자도 알 수 없어요</b> — 잠그고 푸는 것만 됩니다.</p>` +
+      (blocked.length
+        ? `<div class="blist">` + blocked.map((b) =>
+            `<div class="brow"><code>${esc(String(b.uid).slice(0, 8))}…</code>` +
+            `<span class="dim">신고 ${b.reports}건</span>` +
+            `<button class="mini" data-unblock="${esc(b.uid)}" type="button">풀어주기</button></div>`).join("") + `</div>`
+        : `<p class="empty">잠긴 계정이 없습니다.</p>`) +
+      `<div class="row mt"><button class="mini" id="refreshBlocked" type="button">새로고침</button></div></div>`
+    : `<div class="card lockcard"><h3>🔒 관리 잠금</h3>` +
+      `<p class="hint">에어컨 신고 · 계절 · 실측 온도는 <b>모두가 같이 보는 값</b>이라 잠가뒀어요. ` +
+      `리모컨을 만지는 분만 열쇠말을 넣어주세요. 이 기기에서만 켜집니다.</p>` +
+      `<div class="row mt"><input type="password" id="keyIn" class="ti" placeholder="열쇠말" style="flex:1;min-width:0;margin-top:0">` +
+      `<button class="btn accent" id="unlockBtn" type="button">열기</button></div></div>`;
+
   return (
+    lock +
     `<div class="card"><h3>에어컨 실제 설정</h3>` +
     `<p class="insight">${applied === null ? "지금 에어컨이 몇 도로 맞춰져 있나요? 한 번 알려주면 바뀔 때만 알려드려요."
       : need ? `🔧 바꿀 때가 됐어요 — <strong>${fmt(applied)}°C</strong> → <strong>${fmt(c.setpoint)}°C</strong>`
       : `✓ 지금 설정 <strong>${fmt(applied)}°C</strong> 유지 — 계산값과 0.5°C 안이에요.`}</p>` +
-    `<div class="row mt"><button class="btn accent" id="applyBtn" type="button">${fmt(c.setpoint)}°C로 맞췄어요</button></div></div>` +
+    (admin
+      ? `<div class="row mt"><button class="btn accent" id="applyBtn" type="button">${fmt(c.setpoint)}°C로 맞췄어요</button></div>`
+      : `<p class="hint locked">리모컨을 맞추고 나면 담당자가 이 버튼을 눌러줍니다.</p>`) + `</div>` +
 
     `<div class="card"><h3>쉬는 시간</h3><p class="hint">아무나 시작할 수 있고, 모두의 화면에 같은 카운트다운이 뜹니다.</p>` +
     `<div class="row mt">` + [5, 10, 15, 20].map((m) => `<button class="mini" type="button" data-break="${m}">${m}분</button>`).join("") +
@@ -386,13 +425,14 @@ export function configSheet(S, c, b, theme) {
 
     `<div class="card"><h3>계절</h3>` +
     `<p class="hint">같은 사람도 여름엔 26도, 겨울엔 22도가 쾌적합니다. 옷 두께 차이예요. 투표는 자유롭게 받되 최종 온도만 밴드로 자릅니다.</p>` +
-    `<div class="kindseg" id="seasonSeg" style="margin-top:8px;width:fit-content">${seasons}</div>` +
-    `<p class="hint">지금: <b>${esc(b.name)}</b> · 권장 ${b.lo}–${b.hi}°C</p></div>` +
+    (admin ? `<div class="kindseg" id="seasonSeg" style="margin-top:8px;width:fit-content">${seasons}</div>` : "") +
+    `<p class="hint">지금: <b>${esc(b.name)}</b> · 권장 ${b.lo}–${b.hi}°C${admin ? "" : " · 잠김"}</p></div>` +
 
-    `<div class="card"><h3>실내 온습도</h3><p class="hint">온습도계가 있으면 넣어주세요. 실외값보다 훨씬 정확합니다.</p>` +
-    `<div class="row mt"><label class="dim" style="font-size:12px">온도 <input type="number" id="indoorT" step="0.1" value="${S.config?.indoor_t ?? ""}" style="width:72px;padding:8px;border-radius:9px;border:1px solid var(--line-2);background:var(--card);color:var(--ink);font:inherit"></label>` +
+    `<div class="card"><h3>실내 온습도</h3><p class="hint">온습도계가 있으면 넣어주세요. 실외값보다 훨씬 정확합니다.` +
+    (admin ? `</p>` : ` 지금 값: <b>${S.config?.indoor_t ?? "–"}°C / ${S.config?.indoor_rh ?? "–"}%</b> · 잠김</p>`) +
+    (!admin ? "" : `<div class="row mt"><label class="dim" style="font-size:12px">온도 <input type="number" id="indoorT" step="0.1" value="${S.config?.indoor_t ?? ""}" style="width:72px;padding:8px;border-radius:9px;border:1px solid var(--line-2);background:var(--card);color:var(--ink);font:inherit"></label>` +
     `<label class="dim" style="font-size:12px">습도 <input type="number" id="indoorRh" step="1" value="${S.config?.indoor_rh ?? ""}" style="width:72px;padding:8px;border-radius:9px;border:1px solid var(--line-2);background:var(--card);color:var(--ink);font:inherit"></label>` +
-    `<button class="mini" id="indoorSave" type="button">저장</button><button class="mini" id="indoorClear" type="button">지우기</button></div></div>` +
+    `<button class="mini" id="indoorSave" type="button">저장</button><button class="mini" id="indoorClear" type="button">지우기</button></div>`) + `</div>` +
 
     `<div class="card"><h3>내 닉네임</h3><p class="hint">게시판·대화에만 쓰입니다. 온도 투표에는 안 붙어요.</p>` +
     `<div class="row mt"><input type="text" id="nickIn" maxlength="12" value="${esc(S.me.nick || "")}" placeholder="닉네임" style="flex:1;min-width:0;padding:10px 12px;border-radius:10px;border:1px solid var(--line-2);background:var(--card);color:var(--ink);font:inherit">` +
