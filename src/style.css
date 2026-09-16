@@ -194,12 +194,22 @@ a { color: var(--accent); word-break: break-all; }
 .seatrow { display: grid; grid-template-columns: 18px 1fr 1fr; gap: 6px; align-items: stretch; }
 .seatrow .rl { display: grid; place-items: center; font-size: 10.5px; color: var(--ink-3); }
 .seats button {
-  display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 11px 4px;
+  display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 9px 4px 10px;
   border: 1.5px solid var(--line); background: var(--card-2); border-radius: 11px; cursor: pointer;
 }
 .seats button:active { transform: scale(.97); }
-.seats .sn { font-size: 13px; font-weight: 600; }
+.seats .sn { font-size: 11.5px; font-weight: 600; color: var(--ink-3); letter-spacing: .02em; }
+/* 그 구역이 원하는 온도 — 여기가 한눈에 읽혀야 하는 부분입니다 */
+.seats .st { display: flex; align-items: center; justify-content: center; gap: 4px; margin: 2px 0 1px; }
+.seats .st em { font-style: normal; font-size: 17px; line-height: 1; }
+.seats .st b { font-size: 17px; font-weight: 700; letter-spacing: -.025em; font-variant-numeric: tabular-nums; }
+.seats .st .none { font-size: 16px; font-weight: 600; color: var(--line-2); }
 .seats .sm { font-size: 10.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.seats button.cold { background: color-mix(in srgb, var(--cold) 10%, var(--card-2)); }
+.seats button.cold .st b { color: var(--cold); }
+.seats button.hot { background: color-mix(in srgb, var(--hot) 10%, var(--card-2)); }
+.seats button.hot .st b { color: var(--hot); }
+.seats button.ok .st b { color: var(--good); }
 .seats button[aria-pressed="true"] { background: var(--accent-w); border-color: var(--accent); }
 .seats button[aria-pressed="true"] .sn { color: var(--accent); }
 .seats button.less { border-color: var(--cold); }
@@ -208,6 +218,9 @@ a { color: var(--accent); word-break: break-all; }
 .seats button.more .sm { color: var(--hot); font-weight: 600; }
 
 /* 바람 배분 — 결론 */
+.seatkey { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px; margin: 8px 0 0;
+  font-size: 10.5px; color: var(--ink-3); }
+
 .flow .flowtext { font-size: 13.5px; line-height: 1.75; color: var(--ink-2); margin-top: 4px; }
 .flow .flowtext b { color: var(--ink); font-weight: 600; }
 .flow .flowtext b.less { color: var(--cold); }

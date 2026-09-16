@@ -21,7 +21,7 @@ import "./style.css";
 
 import * as db from "./supa.js";
 import { summarise, clamp, toHalf, r1, fmt } from "./stats.js";
-import { ZONES, SEAT_ROWS } from "./zones.js";
+import { ZONES, SEAT_ROWS, ZONE_MIN } from "./zones.js";
 import {
   resolveSeason, zoneBreakdown, airflow, airflowText,
   fetchWeather, weatherLabel, discomfortIndex, discomfortLabel,
@@ -324,24 +324,48 @@ function renderFeel(c) {
 }
 
 /**
+ * 구역이 합의 온도보다 얼마나 더 따뜻하길 원하는가.
+ * gap 이 + 면 "여긴 춥다"(더 따뜻한 온도를 원한다), − 면 "여긴 덥다" 입니다.
+ */
+function seatFeel(r) {
+  if (!r?.shown || !Number.isFinite(r.gap)) return { em: "", cls: "" };
+  if (r.gap >= 0.6) return { em: "🥶", cls: "cold" };
+  if (r.gap <= -0.6) return { em: "🥵", cls: "hot" };
+  return { em: "👌", cls: "ok" };
+}
+
+/**
  * 자리는 실제 강의실처럼 왼쪽 블록 / 오른쪽 블록을 나란히 두고,
  * 위에서 아래로 앞·중·뒤입니다. ZONES 순서대로 2열 그리드에 부으면
  * "왼뒤 옆에 오앞"이 돼서 SEAT_ROWS 로 다시 묶어 깝니다.
+ *
+ * 한 칸에 그 구역이 원하는 온도와 이모지·색을 같이 얹어서,
+ * 표를 안 읽어도 "왼쪽 뒤가 춥구나"가 바로 보이게 했습니다.
+ * 3명 미만인 구역은 여전히 숫자를 안 보여줍니다 (역추적 방지).
  */
 function renderSeats(af) {
   const mine = S.mine?.zone;
   const cell = (i) => {
     const z = ZONES[i], r = af.byZone.get(i);
-    const cls = r?.dir < 0 ? "less" : r?.dir > 0 ? "more" : "";
-    let sub = r?.n ? `${r.n}명` : "빈 자리";
-    if (r?.shown) sub = r.dir < 0 ? `바람 ↓ · ${fmt(r.avg)}°` : r.dir > 0 ? `바람 ↑ · ${fmt(r.avg)}°` : `${fmt(r.avg)}°`;
+    const f = seatFeel(r);
+    const wind = r?.dir < 0 ? "바람 ↓" : r?.dir > 0 ? "바람 ↑" : "";
+    const cls = [f.cls, r?.dir < 0 ? "less" : r?.dir > 0 ? "more" : ""].filter(Boolean).join(" ");
+
+    let big, sub;
+    if (!r?.n) { big = `<span class="none">–</span>`; sub = "빈 자리"; }
+    else if (!r.shown) { big = `<span class="none">–</span>`; sub = `${r.n}명 · ${ZONE_MIN}명부터`; }
+    else { big = `<em>${f.em}</em><b>${fmt(r.avg)}°</b>`; sub = wind ? `${r.n}명 · ${wind}` : `${r.n}명`; }
+
     return `<button type="button" data-zone="${i}" class="${cls}" aria-pressed="${mine === i}">` +
-      `<span class="sn">${esc(z.short)}</span><span class="sm">${esc(sub)}</span></button>`;
+      `<span class="sn">${esc(z.short)}</span><span class="st">${big}</span>` +
+      `<span class="sm">${esc(sub)}</span></button>`;
   };
+
   $("seats").innerHTML =
     `<div class="seatfront">칠판 · 앞</div>` +
     SEAT_ROWS.map((row) =>
-      `<div class="seatrow"><span class="rl">${esc(row.label)}</span>${row.zones.map(cell).join("")}</div>`).join("");
+      `<div class="seatrow"><span class="rl">${esc(row.label)}</span>${row.zones.map(cell).join("")}</div>`).join("") +
+    `<p class="seatkey"><span>🥶 여긴 춥대</span><span>👌 괜찮대</span><span>🥵 여긴 덥대</span></p>`;
 }
 
 function renderFlow(af) {
