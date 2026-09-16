@@ -19,7 +19,6 @@ const esc = (s) =>
 export const SHEETS = [
   { key: "board",  icon: "💬", label: "게시판 · 질문함", desc: "잡담 · 요청 · 링크 · 익명 질문" },
   { key: "stats",  icon: "📊", label: "통계",           desc: "분포 · 정각 기록 · 14일 추이" },
-  { key: "chat",   icon: "🗨️", label: "대화",           desc: "지금 접속한 사람들끼리 한마디" },
   { key: "draw",   icon: "🎲", label: "조 뽑기 · 순서",  desc: "랜덤 조 편성 · 발표 순서" },
   { key: "info",   icon: "🌤️", label: "바깥 · 잡학",    desc: "기온 · 습도 · 불쾌지수" },
   { key: "qr",     icon: "📱", label: "QR 코드",        desc: "폰으로 바로 들어오기" },
@@ -92,19 +91,27 @@ export function statsSheet(S, c, size) {
   );
 }
 
-/* ── 대화 ───────────────────────────────────────────────────────── */
-export function chatSheet(S) {
+/* ── 익명 채팅 (탭으로 올라감) ──────────────────────────────────── */
+/**
+ * 메신저처럼 깝니다 — 오래된 말이 위, 새 말이 아래, 입력칸은 맨 밑.
+ * 목록만 따로 스크롤되고 입력칸은 항상 바닥에 붙어 있어요.
+ * (feed 에 margin-top:auto 를 줘서 말이 몇 개 없을 땐 아래로 내려붙습니다)
+ */
+export function chatView(S) {
   const log = !S.chatlog.length
-    ? `<p class="empty">아직 오간 말이 없어요.<br><span class="dim">지금 접속한 사람에게만 보이고, 창을 닫으면 사라집니다.</span></p>`
-    : `<div class="feed">` + S.chatlog.slice(-50).reverse().map((m) =>
-        `<div class="post"><div class="who"><i class="dot" style="background:${nickColor(m.nick)}">${esc(nickInitial(m.nick))}</i></div>` +
+    ? `<p class="empty">아직 오간 말이 없어요.<br><span class="dim">지금 접속한 사람에게만 보입니다. 창을 닫으면 사라져요.</span></p>`
+    : `<div class="feed">` + S.chatlog.slice(-50).map((m) =>
+        `<div class="post${m.mine ? " me" : ""}"><div class="who"><i class="dot" style="background:${nickColor(m.nick)}">${esc(nickInitial(m.nick))}</i></div>` +
         `<div class="bubble"><div class="txt">${esc(m.msg)}</div>` +
         `<div class="bmeta"><span>${esc(m.nick)} · ${esc(ago(m.at))}</span></div></div></div>`).join("") + `</div>`;
 
   return (
-    `<div class="card compose"><textarea id="chatText" maxlength="80" placeholder="지금 접속한 사람들에게 한마디…"></textarea>` +
-    `<div class="row mt"><button class="btn accent" id="chatSend" type="button" style="margin-left:auto">보내기</button></div>` +
-    `<p class="hint">저장되지 않습니다. 남기려면 게시판을 쓰세요.</p></div>` + log
+    `<div class="chatlog" id="chatLog">${log}</div>` +
+    `<div class="card compose chatbar">` +
+    `<div class="chatrow">` +
+    `<textarea id="chatText" rows="1" maxlength="80" placeholder="한마디 남기기… (익명)"></textarea>` +
+    `<button class="btn accent" id="chatSend" type="button">보내기</button></div>` +
+    `<p class="hint">닉네임만 보이고 아무것도 저장되지 않아요</p></div>`
   );
 }
 
@@ -173,11 +180,26 @@ export function infoSheet(S, b, trivia) {
 }
 
 /* ── QR ─────────────────────────────────────────────────────────── */
+/** localhost / 127.0.0.1 은 폰에서 찍으면 폰 자기 자신을 가리킵니다. */
+const isLocalHost = (h) => /^(localhost|127\.|0\.0\.0\.0|\[?::1\]?)/.test(h);
+
 export function qrSheet() {
+  const warn = !isLocalHost(location.hostname) ? "" :
+    `<div class="card warn"><h3>⚠︎ 지금 이 QR 은 폰에서 안 열려요</h3><p class="hint">` +
+    `주소가 <b>localhost</b> 라서 그렇습니다. 폰이 이 QR 을 찍으면 내 컴퓨터가 아니라 ` +
+    `<b>폰 자기 자신</b>을 찾아가거든요. 그래서 "연결할 수 없음"이 뜹니다.<br><br>` +
+    `<b>지금 당장 · 같은 와이파이라면</b><br>` +
+    `터미널에 뜬 <code>Network: http://192.168.x.x:5173</code> 주소를 이 컴퓨터 주소창에 넣고 ` +
+    `다시 이 QR 을 여세요. 그 주소로 바뀐 QR 은 폰에서 열립니다.<br><br>` +
+    `<b>제대로 쓰려면</b><br>` +
+    `배포하세요. 그래야 와이파이가 달라도, 데이터로도, 노트북을 꺼도 열립니다.</p></div>`;
+
   return (
-    `<div class="card"><h3>폰으로 바로 들어오기</h3>` +
-    `<p class="hint">강의실 화면에 이 QR 을 띄워두면 다들 찍고 바로 들어옵니다. ` +
-    `가입도 로그인도 없어요 — 열자마자 바로 투표할 수 있습니다.</p>` +
+    warn +
+    `<div class="card"><h3>익-커 · 폰으로 바로 들어오기</h3>` +
+    `<p class="hint"><b>익명 커뮤니티</b>, 줄여서 <b>익-커</b>입니다. ` +
+    `강의실 화면에 이 QR 을 띄워두면 다들 찍고 바로 들어와요. ` +
+    `가입도 로그인도 없고, 누가 뭘 눌렀는지는 아무도 못 봅니다.</p>` +
     `<div class="qrbox" id="qrBox"><span class="dim">만드는 중…</span></div>` +
     `<code class="urltext" id="urlText"></code>` +
     `<div class="row mt"><button class="btn" id="copyUrl" type="button">주소 복사</button></div></div>` +

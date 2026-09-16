@@ -151,6 +151,14 @@ export async function saveVote(patch) {
   ping("votes");
 }
 
+/** 퇴실. 집에 간 사람 표가 남은 사람 에어컨을 정하면 안 되니까 아예 지웁니다. */
+export async function clearVote() {
+  if (!supabase || !uid) throw new Error("아직 로그인 전이에요");
+  const { error } = await supabase.from("votes").delete().eq("uid", uid);
+  if (error) throw error;
+  ping("votes");
+}
+
 export async function saveConfig(patch) {
   if (!supabase) throw new Error("설정이 안 됐어요");
   const { error } = await supabase

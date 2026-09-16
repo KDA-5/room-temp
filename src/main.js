@@ -1,15 +1,16 @@
 /**
  * 전부 엮는 곳.
  *
- * 화면은 탭 셋입니다.
- *   🌡️ 온도   지금 맞춰야 할 온도 + 추워요/딱좋음/더워요 + 내 자리 + 바람 배분
- *   🎓 강의   난이도 · 속도
- *   ⋯ 더보기  게시판 · 통계 · 대화 · 뽑기 · 날씨 · QR · 설정
+ * 화면은 탭 넷입니다.
+ *   🌡️ 온도      지금 맞춰야 할 온도 + 추워요/딱좋음/더워요 + 내 자리 + 바람 배분
+ *   🎓 강의      난이도 · 속도
+ *   🗨️ 익명 채팅  지금 접속한 사람끼리만, 저장 안 됨
+ *   ⋯ 더보기     게시판 · 통계 · 뽑기 · 날씨 · QR · 설정
  *
  * 하루에 하는 일은 버튼 하나 누르는 것뿐이라, 그게 폰 첫 화면에서
  * 바로 눌리게 만드는 게 전부입니다.
  *
- * 🥶/🥵 는 내 희망 온도를 ±0.5도 밀어줍니다. 그래서 한 번만 눌러도
+ * 🥶/🥵 는 내 희망 온도를 ±1도 밀어줍니다. 그래서 한 번만 눌러도
  * 기존 20% 절사평균 계산이 그대로 돌아가요.
  *
  * 이 앱의 결론은 "몇 도"가 아니라 **"어느 쪽에 바람을 더/덜 보낼까"** 입니다.
@@ -20,11 +21,13 @@ import "./style.css";
 
 import * as db from "./supa.js";
 import { summarise, clamp, toHalf, r1, fmt } from "./stats.js";
-import { ZONES, ZONE_MIN } from "./zones.js";
+import { ZONES, SEAT_ROWS } from "./zones.js";
 import {
   resolveSeason, zoneBreakdown, airflow, airflowText,
-  fetchWeather, triviaOfToday, TRIVIA, msToNextHour, countdownText,
+  fetchWeather, weatherLabel, discomfortIndex, discomfortLabel,
+  triviaOfToday, TRIVIA, countdownText,
 } from "./climate.js";
+import { scheduleNow } from "./schedule.js";
 import { drawRidge, drawSpark, drawHourly, P } from "./chart.js";
 import { openQuestions } from "./board.js";
 import { makeGroups, pickOne, toMembers } from "./draw.js";
@@ -33,9 +36,24 @@ import * as sh from "./sheets.js";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const ENV_SIZE = Number(import.meta.env.VITE_ROOM_SIZE) || 36;
-const LAT = Number(import.meta.env.VITE_LAT) || 37.5665;
-const LON = Number(import.meta.env.VITE_LON) || 126.978;
+const LAT = Number(import.meta.env.VITE_LAT) || 37.5447;   // 서울 성수동
+const LON = Number(import.meta.env.VITE_LON) || 127.0557;
 const FEEL_MS = 3 * 3600e3;
+const STEP = 1.0;   // 🥶/🥵 한 번에 움직이는 폭
+
+const TAB_TITLE = { temp: "강의실 온도", lecture: "강의 어때요?", chat: "익명 채팅", more: "더보기" };
+
+/* 난이도·속도 다섯 칸. 몇 명이 눌렀는지 같이 보여주려고 JS 에서 그립니다. */
+const DIFF = [
+  { v: -2, em: "🥱", t: "너무<br>쉬움" }, { v: -1, em: "🙂", t: "좀<br>쉬움" },
+  { v: 0, em: "👌", t: "딱<br>좋음" },
+  { v: 1, em: "😵‍💫", t: "좀<br>어려움" }, { v: 2, em: "🆘", t: "너무<br>어려움" },
+];
+const PACE = [
+  { v: -2, em: "🐢", t: "너무<br>느림" }, { v: -1, em: "🚶", t: "좀<br>느림" },
+  { v: 0, em: "👌", t: "딱<br>좋음" },
+  { v: 1, em: "🏃", t: "좀<br>빠름" }, { v: 2, em: "🚀", t: "너무<br>빠름" },
+];
 
 const ADJ = ["졸린", "신난", "느긋한", "반짝이는", "포근한", "산뜻한", "조용한", "부지런한", "엉뚱한", "말랑한"];
 const ANI = ["수달", "펭귄", "너구리", "알파카", "다람쥐", "올빼미", "코알라", "여우", "토끼", "판다"];
@@ -47,6 +65,8 @@ const S = {
   peers: 0, chatlog: [], seenMsg: new Map(),
   tab: "temp", sheet: null, filter: "all", kind: "chat",
   triviaIdx: null, barOpen: false, lastHour: null, breakSeen: null,
+  sched: null, phaseSeen: null, chatSeen: 0, left: false,
+  matchSeen: null, nowSeen: null,
 };
 
 const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
@@ -58,13 +78,67 @@ const roomSize = () => S.config?.room_size || ENV_SIZE;
 const startOfHour = () => { const d = new Date(); d.setMinutes(0, 0, 0); return d.getTime(); };
 const myTemp = () => (Number.isFinite(Number(S.mine?.t)) ? Number(S.mine.t) : null);
 
-let toastTimer = null;
+/* ── 움직임 도구 ──────────────────────────────────────────────────────
+   CSS 애니메이션은 "클래스를 뗐다 붙이면" 다시 돕니다. 다만 그 사이에
+   브라우저가 한 번 레이아웃을 읽어야 해서 offsetWidth 를 건드려 줍니다. */
+const REDUCED = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+
+function replay(el, cls, ms) {
+  if (!el || REDUCED()) return;
+  el.classList.remove(cls);
+  void el.offsetWidth;
+  el.classList.add(cls);
+  if (ms) setTimeout(() => el.classList.remove(cls), ms);
+}
+
+/** 방금 내가 누른 칸에만 링을 한 번 퍼뜨립니다. 남이 눌러 다시 그릴 땐 안 나와요. */
+const pulse = (sel) => replay(typeof sel === "string" ? document.querySelector(sel) : sel, "just", 700);
+
+/**
+ * 숫자를 툭 바꾸지 않고 굴립니다. 온도가 몇 도에서 몇 도로 움직였는지가
+ * 눈에 남아야 "내가 누른 게 반영됐구나"가 보이거든요.
+ */
+const numTweens = new WeakMap();
+function setNum(el, val) {
+  if (!el) return;
+  const prev = el.dataset.v === "" || el.dataset.v === undefined ? NaN : Number(el.dataset.v);
+  const to = Number.isFinite(Number(val)) ? Number(val) : null;
+  const paint = (v) => { el.innerHTML = `${v === null ? "–" : fmt(v)}<i>°</i>`; };
+
+  cancelAnimationFrame(numTweens.get(el) ?? 0);
+  if (to === null) { el.dataset.v = ""; paint(null); return; }
+  el.dataset.v = String(to);
+
+  if (!Number.isFinite(prev) || Math.abs(prev - to) < 0.05 || REDUCED()) {
+    paint(to);
+    if (Number.isFinite(prev) && prev !== to) replay(el, "bump", 600);
+    return;
+  }
+  replay(el, "bump", 600);
+  const t0 = performance.now(), dur = 460;
+  const step = (now) => {
+    const k = Math.min(1, (now - t0) / dur);
+    paint(prev + (to - prev) * (1 - Math.pow(1 - k, 3)));
+    if (k < 1) numTweens.set(el, requestAnimationFrame(step));
+  };
+  numTweens.set(el, requestAnimationFrame(step));
+}
+
+let toastTimer = null, toastHide = null;
 function toast(msg) {
   const t = $("toast");
-  t.textContent = msg;
-  t.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.hidden = true; }, 2600);
+  clearTimeout(toastHide);
+  t.textContent = msg;
+  t.classList.remove("out");
+  // 이미 떠 있으면 숨겼다 켜서 등장 애니메이션을 다시 돌립니다
+  t.hidden = true;
+  void t.offsetWidth;
+  t.hidden = false;
+  toastTimer = setTimeout(() => {
+    t.classList.add("out");
+    toastHide = setTimeout(() => { t.hidden = true; t.classList.remove("out"); }, 220);
+  }, 2600);
 }
 
 function applyTheme(mode) {
@@ -111,14 +185,16 @@ function render() {
   const af = airflow(zb, c.setpoint);
 
   renderHero(c);
+  renderOutside();
+  renderNow();
   renderFeel(c);
   renderSeats(af);
   renderFlow(af);
+  renderLeave();
   renderLecture();
 
-  const open = openQuestions(S.posts);
-  $("qBadge").hidden = open === 0;
-  $("qBadge").textContent = String(open);
+  setBadge($("qBadge"), openQuestions(S.posts));
+  renderChatBadge();
   $("peerChip").hidden = S.peers < 2;
   $("peerChip").querySelector("b").textContent = String(S.peers);
 
@@ -126,23 +202,94 @@ function render() {
   if (S.sheet) renderSheet(S.sheet, c, b);
 }
 
+/**
+ * 숫자 둘을 나란히 둡니다 — 지금 실내가 몇 도인지, 그리고 다들 몇 도를 원하는지.
+ * 하나만 보여주면 "그래서 지금 뭘 해야 하는데"가 안 보이거든요.
+ *
+ * 지금 실내 온도는 설정에서 "이 온도로 맞췄어요"로 남긴 값(applied)이 먼저고,
+ * 없으면 손으로 잰 실내 온도(indoor_t)를 씁니다.
+ */
 function renderHero(c) {
-  $("setpoint").textContent = c.n ? fmt(c.setpoint) : "–";
-  const applied = Number.isFinite(Number(S.config?.applied)) ? Number(S.config.applied) : null;
-  const act = $("heroAct");
+  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
+  const applied = num(S.config?.applied) ?? num(S.config?.indoor_t);
+  const want = c.n ? c.setpoint : null;
+
+  setNum($("nowTemp"), applied);
+  setNum($("setpoint"), want);
+
+  const act = $("heroAct"), arrow = $("heroArrow");
+  const matched = applied !== null && want !== null && Math.abs(want - applied) < 0.5;
+  arrow.className = `harrow${applied === null || want === null ? "" : matched ? " ok" : " move"}`;
+  arrow.textContent = applied === null || want === null ? "→" : matched ? "＝" : "→";
+
+  // 막 맞춰진 순간에만 카드가 한 번 초록으로 번집니다
+  if (matched && S.matchSeen === false) replay($("hero"), "flash", 1100);
+  if (applied !== null && want !== null) S.matchSeen = matched;
 
   if (!c.n) {
     act.className = "heroact";
     act.textContent = "아직 표가 없어요. 아래 버튼을 눌러주세요.";
   } else if (applied === null) {
     act.className = "heroact";
-    act.innerHTML = `${c.n}명이 모아서 정한 온도예요`;
-  } else if (Math.abs(c.setpoint - applied) >= 0.5) {
+    act.innerHTML = `${c.n}명이 누른 값의 평균이에요. 지금 실내 온도는 <b>더보기 › 설정</b>에서 알려주세요`;
+  } else if (!matched) {
     act.className = "heroact move";
-    act.innerHTML = `🔧 지금 <b>${fmt(applied)}°</b> → <b>${fmt(c.setpoint)}°</b> 로 바꿔주세요`;
+    act.innerHTML = `🔧 학생들이 누른 값 평균으로 <b>맞춰지는 중</b> — 온도를 <b>${fmt(want)}°</b> 로`;
   } else {
     act.className = "heroact keep";
-    act.innerHTML = `✓ 지금 설정 <b>${fmt(applied)}°</b> 그대로 두면 돼요`;
+    act.innerHTML = `✓ <b>맞춰짐</b> — 그대로 두면 돼요`;
+  }
+}
+
+/** 바깥(성수동) 기온. 이게 없으면 안이 더운지 추운지 감으로만 얘기하게 돼요. */
+function renderOutside() {
+  const w = S.weather, el = $("heroOut");
+  if (!w || !Number.isFinite(w.t)) { el.hidden = true; return; }
+  const [word, icon] = weatherLabel(w.code);
+  const dl = discomfortLabel(discomfortIndex(w.t, w.rh));
+  el.hidden = false;
+  el.innerHTML =
+    `<span class="oc"><em>${icon}</em>성수동 <b>${fmt(w.t)}°</b></span>` +
+    (Number.isFinite(w.rh) ? `<span class="oc">습도 <b>${Math.round(w.rh)}%</b></span>` : "") +
+    (Number.isFinite(w.feels) ? `<span class="oc">체감 <b>${fmt(w.feels)}°</b></span>` : "") +
+    (dl ? `<span class="oc ${esc(dl.tone)}">${esc(dl.text)}</span>` : `<span class="oc">${esc(word)}</span>`);
+}
+
+/** 지금이 수업인지 쉬는 시간인지. 손으로 켠 쉬는 시간이 있으면 그게 우선입니다. */
+function renderNow() {
+  const brk = breakState();
+  const sc = S.sched ?? scheduleNow();
+  const el = $("nowBar");
+  if (brk) {
+    el.className = "nowbar break";
+    el.innerHTML = `<em>☕</em><span>쉬는 시간 · ${countdownText(brk.left)} 남음</span>`;
+    return;
+  }
+  el.className = `nowbar ${sc.phase}`;
+  el.innerHTML = `<em>${sc.icon}</em><span>${esc(sc.note)}</span>`;
+  if (S.nowSeen !== null && S.nowSeen !== sc.phase) replay(el, "swap", 700);
+  S.nowSeen = sc.phase;
+}
+
+/** 17:50 이후에만 뜨는 퇴실 칸. */
+function renderLeave() {
+  const sc = S.sched ?? scheduleNow();
+  const show = sc.phase === "done";
+  $("leaveBlock").hidden = !show;
+  if (!show) return;
+  const btn = $("leaveBtn");
+  if (S.left) {
+    $("leaveText").textContent = "퇴실했어요. 내 표는 빠졌습니다 — 내일 아침에 다시 눌러주세요.";
+    btn.disabled = true;
+    btn.textContent = "퇴실 완료 👋";
+  } else if (!S.mine) {
+    $("leaveText").textContent = "오늘은 표를 낸 적이 없어요. 바로 들어가셔도 됩니다.";
+    btn.disabled = true;
+    btn.textContent = "내 표 없음";
+  } else {
+    $("leaveText").textContent = "집에 간 사람 표가 남아 있으면 남은 사람 에어컨이 엉뚱해져요. 나가면서 한 번 눌러주세요.";
+    btn.disabled = false;
+    btn.textContent = "퇴실하기 — 내 표 빼기";
   }
 }
 
@@ -171,16 +318,25 @@ function renderFeel(c) {
   sub.textContent = `최근 3시간 ${vals.length}명 · ${word}`;
 }
 
+/**
+ * 자리는 실제 강의실처럼 왼쪽 블록 / 오른쪽 블록을 나란히 두고,
+ * 위에서 아래로 앞·중·뒤입니다. ZONES 순서대로 2열 그리드에 부으면
+ * "왼뒤 옆에 오앞"이 돼서 SEAT_ROWS 로 다시 묶어 깝니다.
+ */
 function renderSeats(af) {
   const mine = S.mine?.zone;
-  $("seats").innerHTML = ZONES.map((z) => {
-    const r = af.byZone.get(z.i);
+  const cell = (i) => {
+    const z = ZONES[i], r = af.byZone.get(i);
     const cls = r?.dir < 0 ? "less" : r?.dir > 0 ? "more" : "";
     let sub = r?.n ? `${r.n}명` : "빈 자리";
     if (r?.shown) sub = r.dir < 0 ? `바람 ↓ · ${fmt(r.avg)}°` : r.dir > 0 ? `바람 ↑ · ${fmt(r.avg)}°` : `${fmt(r.avg)}°`;
-    return `<button type="button" data-zone="${z.i}" class="${cls}" aria-pressed="${mine === z.i}">` +
+    return `<button type="button" data-zone="${i}" class="${cls}" aria-pressed="${mine === i}">` +
       `<span class="sn">${esc(z.short)}</span><span class="sm">${esc(sub)}</span></button>`;
-  }).join("");
+  };
+  $("seats").innerHTML =
+    `<div class="seatfront">칠판 · 앞</div>` +
+    SEAT_ROWS.map((row) =>
+      `<div class="seatrow"><span class="rl">${esc(row.label)}</span>${row.zones.map(cell).join("")}</div>`).join("");
 }
 
 function renderFlow(af) {
@@ -235,6 +391,11 @@ function lectureState() {
   const nums = (k) => live.map((v) => v[k]).filter((x) => x !== null && x !== undefined).map(Number);
   const avg = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN);
   const d = nums("diff"), p = nums("pace");
+  const dist = (k) => {
+    const m = new Map();
+    for (const v of live) { const x = v[k]; if (x === null || x === undefined) continue; m.set(Number(x), (m.get(Number(x)) ?? 0) + 1); }
+    return m;
+  };
   const at = S.mine?.lec_at ? Date.parse(S.mine.lec_at) : 0;
   const mine = at >= h0 ? { diff: S.mine.diff, pace: S.mine.pace } : { diff: null, pace: null };
 
@@ -247,7 +408,8 @@ function lectureState() {
     else if (D <= -1 && Pc <= -0.5) tip = "쉽고 느리다니 진도를 당겨도 괜찮겠습니다.";
   }
   return { n: live.length, hour: new Date(h0).getHours(), mine,
-           dAvg: avg(d), pAvg: avg(p), dN: d.length, pN: p.length, tip };
+           dAvg: avg(d), pAvg: avg(p), dN: d.length, pN: p.length,
+           dDist: dist("diff"), pDist: dist("pace"), tip };
 }
 
 function verdictHTML(avg, n, lowWord, highWord, emLow, emHigh) {
@@ -260,13 +422,33 @@ function verdictHTML(avg, n, lowWord, highWord, emLow, emHigh) {
     `<div class="vt">${esc(txt)}</div><div class="vs">${n}명 · 평균 ${avg > 0 ? "+" : ""}${avg.toFixed(1)}</div></div></div>`;
 }
 
+/**
+ * 다섯 칸을 그립니다. 아래 가는 띠는 그 칸에 몇 표가 왔는지 — 남들이
+ * 이미 눌렀다는 게 보여야 나도 누르게 되거든요. 숫자만 나오고 누군지는 안 나옵니다.
+ */
+function renderFive(id, key, opts, mine, dist) {
+  const max = Math.max(1, ...dist.values());
+  const has = mine !== null && mine !== undefined;
+  $(id).innerHTML = opts.map((o) => {
+    const n = dist.get(o.v) ?? 0;
+    const on = has && Number(mine) === o.v;
+    return `<button type="button" data-${key}="${o.v}" aria-pressed="${on}" style="--w:${(n / max).toFixed(2)}">` +
+      `<em>${o.em}</em><b>${o.t}</b>` + (n ? `<i class="n">${n}</i>` : "") + `</button>`;
+  }).join("");
+}
+
 function renderLecture() {
   const lec = lectureState();
-  $("lecNote").innerHTML = `익명입니다. <b>정각마다 초기화</b>되니 매 시간 편하게 눌러주세요. 지금은 <b>${lec.hour}시</b> 집계 · ${lec.n}명.`;
-  for (const [row, key, mine] of [["diffRow", "diff", lec.mine.diff], ["paceRow", "pace", lec.mine.pace]]) {
-    document.querySelectorAll(`#${row} button`).forEach((el) => {
-      el.setAttribute("aria-pressed", String(mine !== null && String(mine) === el.dataset[key]));
-    });
+  const sc = S.sched ?? scheduleNow();
+  const when = sc.phase === "class" && sc.period ? `${sc.period}교시` : `${lec.hour}시`;
+  $("lecNote").innerHTML = `익명입니다. <b>교시마다 초기화</b>되니 매 시간 편하게 눌러주세요. 지금은 <b>${esc(when)}</b> 집계 · ${lec.n}명.`;
+
+  renderFive("diffRow", "diff", DIFF, lec.mine.diff, lec.dDist);
+  renderFive("paceRow", "pace", PACE, lec.mine.pace, lec.pDist);
+  for (const [id, mine] of [["diffSub", lec.mine.diff], ["paceSub", lec.mine.pace]]) {
+    const ask = mine === null || mine === undefined;
+    $(id).className = ask ? "sub ask" : "sub";
+    $(id).textContent = ask ? "아직 안 눌렀어요" : "완료 · 다시 누르면 취소";
   }
   $("diffVerdict").innerHTML = verdictHTML(lec.dAvg, lec.dN, "쉬움", "어려움", "🥱", "🆘");
   $("paceVerdict").innerHTML = verdictHTML(lec.pAvg, lec.pN, "느림", "빠름", "🐢", "🚀");
@@ -303,13 +485,18 @@ async function pushVote(patch, { debounce = false } = {}) {
   else await run();
 }
 
-/** 🥶/🥵 한 번이 내 희망 온도를 0.5도 밀어줍니다. */
+/**
+ * 🥶/🥵 한 번이 내 희망 온도를 1도 밀어줍니다.
+ * 🥶 추워요(dir −1) 는 "더 따뜻하게"라서 희망 온도가 **올라가고**,
+ * 🥵 더워요(dir +1) 는 내려갑니다. s 에는 체감 부호를 그대로 남겨요.
+ */
 function nudge(dir) {
   const b = band(), c = summarise(S.votes, b);
   const base = myTemp() ?? c.setpoint ?? b.def;
-  const t = dir === 0 ? toHalf(c.setpoint) : clamp(toHalf(base + dir * 0.5), b.min, b.max);
+  const t = dir === 0 ? toHalf(c.setpoint) : clamp(toHalf(base - dir * STEP), b.min, b.max);
+  S.left = false;
   pushVote({ t, s: dir, s_at: new Date().toISOString() });
-  toast(dir === 0 ? `딱 좋음 — 내 희망 ${fmt(t)}°` : `내 희망 ${fmt(t)}° 로 ${dir > 0 ? "올렸" : "내렸"}어요`);
+  toast(dir === 0 ? `딱 좋음 — 내 희망 ${fmt(t)}°` : `내 희망 ${fmt(t)}° 로 ${dir < 0 ? "올렸" : "내렸"}어요`);
 }
 
 let histTimer = null;
@@ -327,40 +514,110 @@ function queueHistory() {
   }, 2500);
 }
 
+/** 퇴실 — 내 표를 빼서, 남아 있는 사람 기준으로 온도가 다시 잡히게 합니다. */
+async function leaveForDay() {
+  if (!db.configured) return toast("아직 연결 전이에요");
+  try {
+    await db.clearVote();
+    S.left = true;
+    S.mine = null;
+    S.votes = S.votes.filter((v) => !v.is_me);
+    render();
+    toast("오늘 수고하셨어요 👋");
+  } catch { toast("표를 빼지 못했어요"); }
+}
+
 async function saveConfig(patch) {
   try { await db.saveConfig(patch); await refresh("meta"); }
   catch { toast("저장하지 못했어요"); }
 }
 
 /* ── 탭 · 시트 ────────────────────────────────────────────────────────── */
+const TAB_ORDER = ["temp", "lecture", "chat", "more"];
+
 function setTab(tab) {
+  // 오른쪽 탭으로 가면 오른쪽에서, 왼쪽으로 가면 왼쪽에서 밀려 들어옵니다
+  const from = TAB_ORDER.indexOf(S.tab), to = TAB_ORDER.indexOf(tab);
+  $("main").dataset.dir = to >= from ? "r" : "l";
+
   S.tab = tab;
-  for (const [k, id] of [["temp", "viewTemp"], ["lecture", "viewLecture"], ["more", "viewMore"]]) {
+  for (const [k, id] of [["temp", "viewTemp"], ["lecture", "viewLecture"], ["chat", "viewChat"], ["more", "viewMore"]]) {
     $(id).hidden = k !== tab;
   }
   document.querySelectorAll("#tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === tab)));
+  $("title").textContent = TAB_TITLE[tab] ?? TAB_TITLE.temp;
   if (tab === "more" && !S.sheet) $("moreMenu").innerHTML = sh.menuHTML(S);
+  if (tab === "chat") renderChat();
+  renderChatBadge();
   $("main").scrollTop = 0;
+}
+
+/* ── 익명 채팅 ────────────────────────────────────────────────────────── */
+/**
+ * 접속한 사람끼리만 오갑니다(presence). 서버에 안 남으니 창을 닫으면 사라져요.
+ * 다시 그릴 때 쓰던 글이 날아가지 않게 입력칸 내용만 옮겨 담습니다.
+ */
+function renderChat() {
+  const draft = $("chatText")?.value ?? "";
+  const at = $("chatText")?.selectionStart ?? draft.length;
+  $("viewChat").innerHTML = sh.chatView(S);
+  const ta = $("chatText");
+  if (ta && draft) { ta.value = draft; ta.setSelectionRange(at, at); }
+  // 새 말은 늘 맨 아래에 붙으니 거기로 내려줍니다
+  const log = $("chatLog");
+  if (log) log.scrollTop = log.scrollHeight;
+  if (S.tab === "chat") S.chatSeen = S.chatlog.length;
+}
+
+/** 숫자가 진짜 바뀐 때만 톡 튀게 합니다. 매번 튀면 눈이 아파요. */
+function setBadge(el, n) {
+  const txt = n > 9 ? "9+" : String(n);
+  if (n <= 0) { el.hidden = true; el.textContent = "0"; return; }
+  const changed = el.hidden || el.textContent !== txt;
+  el.textContent = txt;
+  el.hidden = false;
+  if (changed) replay(el, "pop", 600);
+}
+
+function renderChatBadge() {
+  setBadge($("cBadge"), S.tab === "chat" ? 0 : S.chatlog.length - S.chatSeen);
+}
+
+function sendChat() {
+  const ta = $("chatText");
+  if (!ta) return;
+  const msg = ta.value.trim().slice(0, 80);
+  if (!msg) return ta.focus();
+  const at = Date.now();
+  db.setPresence({ nick: S.me.nick || "익명", msg, msgAt: at });
+  S.chatlog.push({ nick: S.me.nick || "익명", msg, at, mine: true });
+  ta.value = "";
+  renderChat();
+  $("chatText")?.focus();
 }
 
 function openSheet(key) {
   S.sheet = key;
   $("sheetTitle").textContent = sh.TITLES[key] ?? "";
+  $("sheet").classList.remove("out");
   $("sheet").hidden = false;
   renderSheet(key, summarise(S.votes, band()), band());
   $("sheetBody").scrollTop = 0;
 }
 
 function closeSheet() {
+  const el = $("sheet");
   S.sheet = null;
-  $("sheet").hidden = true;
   $("moreMenu").innerHTML = sh.menuHTML(S);
+  if (REDUCED()) { el.hidden = true; return; }
+  el.classList.add("out");
+  // 닫히는 동안 다시 열 수도 있으니 그때는 그대로 둡니다
+  setTimeout(() => { el.classList.remove("out"); if (!S.sheet) el.hidden = true; }, 200);
 }
 
 function renderSheet(key, c, b) {
   const body = $("sheetBody");
   if (key === "board") body.innerHTML = sh.boardSheet(S);
-  else if (key === "chat") body.innerHTML = sh.chatSheet(S);
   else if (key === "draw") body.innerHTML = sh.drawSheet(S, toMembers(S.votes));
   else if (key === "info") body.innerHTML = sh.infoSheet(S, b, S.triviaIdx === null ? triviaOfToday() : TRIVIA[S.triviaIdx % TRIVIA.length]);
   else if (key === "config") body.innerHTML = sh.configSheet(S, c, b, lsGet("roomtemp.theme") || "system");
@@ -416,21 +673,43 @@ function breakState() {
   return left > 0 ? { left, until } : null;
 }
 
+/**
+ * 1초마다. 시간표(수업 50분 · 쉬는 10분 · 점심 11:50~13:00 · 17:50 끝)를
+ * 헤더 칩에 띄우고, 교시가 바뀌는 순간에만 화면을 다시 그립니다.
+ */
 function tickClock() {
   const brk = breakState(), chip = $("clockChip");
+  const sc = scheduleNow();
+  S.sched = sc;
+
   if (brk) {
+    // 설정에서 손으로 켠 쉬는 시간이 시간표보다 우선입니다
     chip.textContent = `☕ ${countdownText(brk.left)}`;
     chip.className = "chip live";
     S.breakSeen = brk.until;
   } else {
     if (S.breakSeen) { toast("쉬는 시간 끝 — 자리로 돌아와 주세요"); S.breakSeen = null; }
-    const left = msToNextHour();
-    chip.textContent = `⏱ ${countdownText(left)}`;
-    chip.className = `chip${left < 60e3 ? " due" : ""}`;
+    chip.textContent = sc.left === null ? `${sc.icon} ${sc.label}` : `${sc.icon} ${sc.label} · ${countdownText(sc.left)}`;
+    chip.className = `chip${sc.phase === "break" || sc.phase === "lunch" ? " live" : ""}` +
+                     `${sc.phase === "class" && sc.left < 60e3 ? " due" : ""}`;
   }
+  if (S.tab === "temp") renderNow();
+
   const hour = startOfHour();
   if (S.lastHour === null) S.lastHour = hour;
   else if (hour !== S.lastHour) { S.lastHour = hour; onHourStruck(); }
+
+  // 수업 ↔ 쉬는 시간이 바뀌는 순간에만 전체를 다시 그립니다
+  if (S.phaseSeen !== sc.phase) {
+    const first = S.phaseSeen === null;
+    S.phaseSeen = sc.phase;
+    if (!first) {
+      render();
+      if (sc.phase === "break") toast("쉬는 시간이에요 ☕");
+      else if (sc.phase === "lunch") toast("점심시간 🍚");
+      else if (sc.phase === "done") toast("오늘 수업 끝 — 퇴실 버튼 눌러주세요 🏠");
+    }
+  }
 }
 
 async function onHourStruck() {
@@ -452,7 +731,9 @@ function wire() {
 
   $("feelRow").addEventListener("click", (e) => {
     const b = e.target.closest("[data-feel]");
-    if (b) nudge(Number(b.dataset.feel));
+    if (!b) return;
+    nudge(Number(b.dataset.feel));
+    pulse(b);   // 이 칸은 다시 안 그려지니 그대로 클래스를 붙입니다
   });
 
   $("myRow").addEventListener("click", () => { S.barOpen = !S.barOpen; render(); });
@@ -469,7 +750,9 @@ function wire() {
     const b = e.target.closest("[data-zone]");
     if (!b) return;
     const z = Number(b.dataset.zone);
-    pushVote({ zone: S.mine?.zone === z ? null : z });
+    const off = S.mine?.zone === z;
+    pushVote({ zone: off ? null : z });
+    if (!off) pulse(`#seats [data-zone="${z}"]`);   // pushVote 안에서 이미 다시 그려진 뒤입니다
   });
 
   for (const [row, key] of [["diffRow", "diff"], ["paceRow", "pace"]]) {
@@ -477,9 +760,20 @@ function wire() {
       const b = e.target.closest(`[data-${key}]`);
       if (!b) return;
       const on = b.getAttribute("aria-pressed") === "true";
-      pushVote({ [key]: on ? null : Number(b.dataset[key]), lec_at: on ? null : new Date().toISOString() });
+      const v = Number(b.dataset[key]);
+      pushVote({ [key]: on ? null : v, lec_at: on ? null : new Date().toISOString() });
+      if (!on) pulse(`#${row} [data-${key}="${v}"]`);
     });
   }
+
+  $("viewChat").addEventListener("click", (e) => {
+    if (e.target.closest("#chatSend")) sendChat();
+  });
+  $("viewChat").addEventListener("keydown", (e) => {
+    if (e.target.id === "chatText" && e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); }
+  });
+
+  $("leaveBtn").addEventListener("click", leaveForDay);
 
   $("moreMenu").addEventListener("click", (e) => {
     const b = e.target.closest("[data-sheet]");
@@ -537,17 +831,6 @@ async function onSheetClick(e) {
       again("board");
     } catch (err) { toast(err.message?.slice(0, 70) || "처리하지 못했어요"); }
     return;
-  }
-
-  // 대화
-  if (hit("#chatSend")) {
-    const ta = $("chatText"), msg = ta.value.trim().slice(0, 80);
-    if (!msg) return ta.focus();
-    const at = Date.now();
-    db.setPresence({ nick: S.me.nick || "익명", msg, msgAt: at });
-    S.chatlog.push({ nick: S.me.nick || "익명", msg, at, mine: true });
-    ta.value = "";
-    return again("chat");
   }
 
   if (hit("#triviaNext")) { S.triviaIdx = ((S.triviaIdx ?? 0) + 1) % TRIVIA.length; return again("info"); }
@@ -637,11 +920,14 @@ async function boot() {
   tickClock();
   setInterval(tickClock, 1000);
 
-  fetchWeather(LAT, LON).then((w) => {
-    S.weather = w;
-    if (S.sheet === "info") renderSheet("info", summarise(S.votes, band()), band());
-  }).catch(() => {});
-  setInterval(() => fetchWeather(LAT, LON).then((w) => { S.weather = w; }).catch(() => {}), 15 * 60e3);
+  const pullWeather = () =>
+    fetchWeather(LAT, LON).then((w) => {
+      S.weather = w;
+      renderOutside();
+      if (S.sheet === "info") renderSheet("info", summarise(S.votes, band()), band());
+    }).catch(() => {});
+  pullWeather();
+  setInterval(pullWeather, 15 * 60e3);
 
   $("boot").classList.add("gone");
   setTimeout(() => $("boot")?.remove(), 400);
@@ -658,9 +944,10 @@ async function boot() {
       S.seenMsg.set(p.key, p.msgAt);
       if (p.key === S.uid) continue;
       S.chatlog.push({ nick: p.nick || "익명", msg: p.msg, at: p.msgAt, mine: false });
-      if (S.chatlog.length > 120) S.chatlog.splice(0, S.chatlog.length - 120);
-      if (S.sheet === "chat") renderSheet("chat", summarise(S.votes, band()), band());
+      if (S.chatlog.length > 120) { S.chatlog.splice(0, S.chatlog.length - 120); S.chatSeen = Math.max(0, S.chatSeen - 1); }
+      if (S.tab === "chat") renderChat();
     }
+    renderChatBadge();
     $("peerChip").hidden = S.peers < 2;
     $("peerChip").querySelector("b").textContent = String(S.peers);
   });

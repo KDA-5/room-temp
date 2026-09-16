@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="description" content="강의실 온도를 익명으로 정하는 곳. 3초면 끝납니다.">
+<meta name="description" content="익-커 — KDA 5기 익명 커뮤니티. 강의실 온도를 익명으로 정하는 곳. 3초면 끝납니다.">
 <meta name="theme-color" content="#f5f6f8">
-<title>강의실 온도</title>
+<title>익-커 · 강의실 온도</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -17,7 +17,10 @@
 <div class="app">
 
   <header class="top">
-    <h1>강의실 온도</h1>
+    <div class="brand">
+      <h1 id="title">강의실 온도</h1>
+      <span class="crew"><b>익-커</b>KDA 5기</span>
+    </div>
     <div class="topmeta">
       <span class="chip" id="peerChip" hidden>● <b>0</b>명</span>
       <span class="chip" id="clockChip">--:--</span>
@@ -30,26 +33,38 @@
     <section class="view" id="viewTemp">
 
       <div class="hero" id="hero">
-        <div class="herolab">지금 맞춰야 할 온도</div>
-        <div class="herobig"><span id="setpoint">–</span><span class="deg">°C</span></div>
+        <div class="herotwo">
+          <div class="hcol">
+            <div class="hlab">지금 실내 온도</div>
+            <div class="hval" id="nowTemp">–<i>°</i></div>
+          </div>
+          <div class="harrow" id="heroArrow">→</div>
+          <div class="hcol want">
+            <div class="hlab">학생들이 원하는 온도</div>
+            <div class="hval" id="setpoint">–<i>°</i></div>
+          </div>
+        </div>
         <div class="heroact" id="heroAct">표가 모이면 정해집니다</div>
+        <div class="heroout" id="heroOut" hidden></div>
       </div>
+
+      <div class="nowbar" id="nowBar"></div>
 
       <div class="block">
         <div class="blockhead"><h2>지금 어때요?</h2><span class="sub" id="feelSub"></span></div>
         <div class="three" id="feelRow">
-          <button type="button" data-feel="-1"><em>🥶</em><b>추워요</b><i>+0.5°</i></button>
+          <button type="button" data-feel="-1"><em>🥶</em><b>추워요</b><i>+1°</i></button>
           <button type="button" data-feel="0"><em>👌</em><b>딱 좋아요</b><i>지금 그대로</i></button>
-          <button type="button" data-feel="1"><em>🥵</em><b>더워요</b><i>−0.5°</i></button>
+          <button type="button" data-feel="1"><em>🥵</em><b>더워요</b><i>−1°</i></button>
         </div>
 
         <button class="myrow" id="myRow" type="button" aria-expanded="false">
           <span class="mylab">내 희망 온도</span>
           <span class="myval" id="myVal">–</span>
-          <span class="mychev">직접 고르기 ▾</span>
+          <span class="mychev">직접 고르기 <i class="cv">▾</i></span>
         </button>
         <div class="barwrap" id="barWrap" hidden>
-          <svg id="tempBar" viewBox="0 0 640 96" role="group" aria-label="희망 온도 고르기"></svg>
+          <svg id="tempBar" viewBox="0 0 640 126" role="group" aria-label="희망 온도 고르기"></svg>
         </div>
       </div>
 
@@ -62,6 +77,12 @@
         <div class="blockhead"><h2>🌬️ 바람 배분</h2></div>
         <div class="flowtext" id="flowText"></div>
       </div>
+
+      <div class="block leave" id="leaveBlock" hidden>
+        <div class="blockhead"><h2>🏠 오늘 끝</h2></div>
+        <p class="leavetext" id="leaveText"></p>
+        <button class="leavebtn" id="leaveBtn" type="button">퇴실하기</button>
+      </div>
     </section>
 
     <!-- ── 강의 탭 ─────────────────────────────── -->
@@ -69,31 +90,22 @@
       <p class="note" id="lecNote"></p>
 
       <div class="block">
-        <div class="blockhead"><h2>난이도</h2></div>
-        <div class="five" id="diffRow">
-          <button type="button" data-diff="-2"><em>🥱</em>너무<br>쉬움</button>
-          <button type="button" data-diff="-1"><em>🙂</em>좀<br>쉬움</button>
-          <button type="button" data-diff="0"><em>👌</em>딱<br>좋음</button>
-          <button type="button" data-diff="1"><em>😵‍💫</em>좀<br>어려움</button>
-          <button type="button" data-diff="2"><em>🆘</em>너무<br>어려움</button>
-        </div>
+        <div class="blockhead"><h2>난이도</h2><span class="sub" id="diffSub"></span></div>
+        <div class="five" id="diffRow"></div>
         <div id="diffVerdict"></div>
       </div>
 
       <div class="block">
-        <div class="blockhead"><h2>속도</h2></div>
-        <div class="five" id="paceRow">
-          <button type="button" data-pace="-2"><em>🐢</em>너무<br>느림</button>
-          <button type="button" data-pace="-1"><em>🚶</em>좀<br>느림</button>
-          <button type="button" data-pace="0"><em>👌</em>딱<br>좋음</button>
-          <button type="button" data-pace="1"><em>🏃</em>좀<br>빠름</button>
-          <button type="button" data-pace="2"><em>🚀</em>너무<br>빠름</button>
-        </div>
+        <div class="blockhead"><h2>속도</h2><span class="sub" id="paceSub"></span></div>
+        <div class="five" id="paceRow"></div>
         <div id="paceVerdict"></div>
       </div>
 
       <p class="tip" id="lecTip" hidden></p>
     </section>
+
+    <!-- ── 익명 채팅 탭 ────────────────────────── -->
+    <section class="view" id="viewChat" hidden></section>
 
     <!-- ── 더보기 탭 ───────────────────────────── -->
     <section class="view" id="viewMore" hidden>
@@ -111,6 +123,7 @@
   <nav class="tabs" id="tabs">
     <button type="button" data-tab="temp" aria-selected="true"><em>🌡️</em>온도</button>
     <button type="button" data-tab="lecture" aria-selected="false"><em>🎓</em>강의</button>
+    <button type="button" data-tab="chat" aria-selected="false"><em>🗨️</em>익명 채팅<i class="badge" id="cBadge" hidden></i></button>
     <button type="button" data-tab="more" aria-selected="false"><em>⋯</em>더보기<i class="badge" id="qBadge" hidden></i></button>
   </nav>
 

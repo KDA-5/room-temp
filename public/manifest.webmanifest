@@ -1,17 +1,17 @@
 {
-  "name": "강의실 상태판",
-  "short_name": "온도판",
-  "description": "익명 투표로 강의실 설정온도를 정하고, 매 정각마다 조절 여부를 알려줍니다.",
+  "name": "익-커 · KDA 5기 익명 커뮤니티",
+  "short_name": "익-커",
+  "description": "KDA 5기 익명 커뮤니티. 익명 투표로 강의실 온도를 정하고, 교시마다 조절 여부를 알려줍니다.",
   "lang": "ko",
-  "start_url": "/",
-  "scope": "/",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#eceff5",
   "theme_color": "#eceff5",
   "icons": [
     {
-      "src": "/icon.svg",
+      "src": "./icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any"

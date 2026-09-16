@@ -8,9 +8,11 @@
  */
 
 export const SEASONS = {
-  summer:   { key: "summer",   name: "여름 · 냉방", short: "여름",   min: 22, max: 30, lo: 24, hi: 28, def: 26.0 },
-  shoulder: { key: "shoulder", name: "간절기",      short: "간절기", min: 19, max: 28, lo: 21, hi: 26, def: 23.5 },
-  winter:   { key: "winter",   name: "겨울 · 난방", short: "겨울",   min: 17, max: 26, lo: 19, hi: 23, def: 21.0 },
+  // min~max 는 "내가 고를 수 있는 폭", lo~hi 는 "합의 타점이 머무는 폭"입니다.
+  // 고르는 건 18~30 로 다 열어두고, 실제 리모컨 값만 계절 밴드 안으로 잡아요.
+  summer:   { key: "summer",   name: "여름 · 냉방", short: "여름",   min: 18, max: 30, lo: 24, hi: 28, def: 26.0 },
+  shoulder: { key: "shoulder", name: "간절기",      short: "간절기", min: 18, max: 30, lo: 21, hi: 26, def: 23.5 },
+  winter:   { key: "winter",   name: "겨울 · 난방", short: "겨울",   min: 18, max: 30, lo: 19, hi: 23, def: 21.0 },
 };
 
 export function seasonForMonth(m) {
@@ -117,7 +119,7 @@ export function windSummary(votes) {
 
 /** 화면에 그대로 쓸 한 줄 지시문. */
 export function airflowText(af, n) {
-  if (n < ZONE_MIN) return `자리를 고른 사람이 ${n}명이에요. ${ZONE_MIN}명 넘게 모인 구역부터 바람 배분이 나옵니다.`;
+  if (n < ZONE_MIN) return `자리를 고른 사람이 ${n}명이에요. 한 구역에 ${ZONE_MIN}명부터 바람 배분이 나옵니다.`;
   if (af.balanced) return "지금은 구역 간 차이가 크지 않아요. 바람을 따로 돌릴 필요 없습니다.";
 
   const parts = [];
@@ -262,10 +264,12 @@ export function hhmm(ts) {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
-/** 23:41 형식의 카운트다운. */
+/** 23:41 형식의 카운트다운. 한 시간이 넘으면 1:10:00 으로 늘립니다(점심시간). */
 export function countdownText(ms) {
   const total = Math.max(0, Math.floor(ms / 1000));
-  const m = Math.floor(total / 60);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor(total / 60) % 60;
   const s = total % 60;
-  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  const mm = String(h ? m : Math.floor(total / 60)).padStart(2, "0");
+  return `${h ? `${h}:` : ""}${mm}:${String(s).padStart(2, "0")}`;
 }

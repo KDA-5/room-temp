@@ -1,0 +1,60 @@
+# 깃허브에 올리면 알아서 빌드해서 GitHub Pages 에 올려줍니다.
+# 노트북은 아무것도 안 해도 되고, 주소도 안 바뀝니다.
+#
+# Supabase 주소/키는 저장소에 안 두고 Settings › Secrets 에 넣어둔 걸 꺼내 씁니다.
+# (anon 키는 원래 브라우저에 공개되는 값이지만, 저장소에 박아두진 않습니다)
+
+name: GitHub Pages 배포
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch: # 깃허브 화면에서 손으로도 돌릴 수 있게
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 연달아 푸시해도 마지막 것만 배포합니다
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build
+        env:
+          # Pages 는 https://<아이디>.github.io/<저장소이름>/ 아래에 놓이므로
+          # 자산 경로 앞에 저장소 이름을 붙여야 합니다.
+          VITE_BASE: /${{ github.event.repository.name }}/
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_ROOM_SIZE: "36"
+          VITE_LAT: "37.5447" # 서울 성수동
+          VITE_LON: "127.0557"
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
